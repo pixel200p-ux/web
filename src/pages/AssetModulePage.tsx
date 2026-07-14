@@ -325,19 +325,19 @@ export function AssetModulePage({
 
       {/* Summary */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+        <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng tài sản</p>
           <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(categoryTotalAsset)}</h3>
         </div>
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+        <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Cash</p>
           <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(categoryCash)}</h3>
         </div>
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+        <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Giá trị thị trường</p>
           <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(categoryMarketValue)}</h3>
         </div>
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+        <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Lãi/Lỗ</p>
           <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${(categoryUnrealized + categoryRealized) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
             {(categoryUnrealized + categoryRealized) >= 0 ? '+' : ''}{formatMoney(categoryUnrealized + categoryRealized)}

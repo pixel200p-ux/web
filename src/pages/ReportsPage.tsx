@@ -27,25 +27,25 @@ export function ReportsPage({ data }: { data: PortfolioData }) {
       <div>
         <h2 className="mb-3 text-lg font-semibold text-slate-700 dark:text-slate-300">Báo cáo lợi nhuận</h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
-          <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
             <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng Lãi/Lỗ</p>
             <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
             </h3>
           </div>
-          <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
             <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Chưa thực hiện</p>
             <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalUnrealizedPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {summary.totalUnrealizedPnL >= 0 ? '+' : ''}{formatMoney(summary.totalUnrealizedPnL)}
             </h3>
           </div>
-          <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
             <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Đã thực hiện</p>
             <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalRealizedPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {summary.totalRealizedPnL >= 0 ? '+' : ''}{formatMoney(summary.totalRealizedPnL)}
             </h3>
           </div>
-          <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
             <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng lợi nhuận</p>
             <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {formatPct(summary.totalReturnPct)}
