@@ -56,40 +56,38 @@ export function DashboardPage({ data }: { data: PortfolioData }) {
         <p className="text-sm text-slate-500 dark:text-slate-400">Tổng quan toàn bộ danh mục đầu tư</p>
       </div>
 
-      {/* Portfolio Summary Cards — mobile-first: 1 col on phone, 2 on tablet, 4 on desktop */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* KPI Cards — 2 cols on mobile, 4 on desktop, compact */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
         {/* Tổng tài sản */}
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg transition-shadow hover:shadow-xl dark:border-slate-700 dark:bg-slate-800/60 sm:p-6">
-          <p className="text-base font-medium text-slate-500 dark:text-slate-400">Tổng tài sản</p>
-          <p className="mt-2 text-2xl font-bold text-slate-800 dark:text-slate-100 sm:text-3xl">{formatMoney(summary.totalAsset)}</p>
-          <p className={`mt-1 text-sm font-semibold ${summary.totalReturnPct >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {formatPct(summary.totalReturnPct)}
-          </p>
-        </div>
-
-        {/* Tổng tiền đã nạp */}
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg transition-shadow hover:shadow-xl dark:border-slate-700 dark:bg-slate-800/60 sm:p-6">
-          <p className="text-base font-medium text-slate-500 dark:text-slate-400">Tổng tiền đã nạp</p>
-          <p className="mt-2 text-2xl font-bold text-slate-800 dark:text-slate-100 sm:text-3xl">{formatMoney(totalDeposit)}</p>
-          <p className="mt-1 text-sm font-medium text-blue-500">Vốn gốc</p>
-        </div>
-
-        {/* Tổng Lãi/Lỗ */}
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg transition-shadow hover:shadow-xl dark:border-slate-700 dark:bg-slate-800/60 sm:p-6">
-          <p className="text-base font-medium text-slate-500 dark:text-slate-400">Tổng Lãi/Lỗ</p>
-          <p className={`mt-2 text-2xl font-bold sm:text-3xl ${summary.totalPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {formatMoney(summary.totalPnL)}
-          </p>
-          <p className={`mt-1 text-sm font-semibold ${summary.totalReturnPct >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {formatPct(summary.totalReturnPct)}
-          </p>
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-zinc-100 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400 md:text-sm">Tổng tài sản</p>
+          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-2xl">{formatMoney(summary.totalAsset)}</h3>
+          <p className={`mt-0.5 truncate text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatPct(summary.totalReturnPct)}</p>
         </div>
 
         {/* Cash */}
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg transition-shadow hover:shadow-xl dark:border-slate-700 dark:bg-slate-800/60 sm:p-6">
-          <p className="text-base font-medium text-slate-500 dark:text-slate-400">Cash</p>
-          <p className="mt-2 text-2xl font-bold text-slate-800 dark:text-slate-100 sm:text-3xl">{formatMoney(summary.totalCash)}</p>
-          <p className="mt-1 text-sm font-medium text-slate-400">{summary.allocation.CASH?.toFixed(1) || 0}% tổng tài sản</p>
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-zinc-100 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400 md:text-sm">Cash</p>
+          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-2xl">{formatMoney(summary.totalCash)}</h3>
+          <p className="mt-0.5 truncate text-[10px] font-medium text-zinc-400 md:text-xs">{summary.allocation.CASH?.toFixed(1) || 0}% tổng tài sản</p>
+        </div>
+
+        {/* Tổng tiền đã nạp */}
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-zinc-100 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400 md:text-sm">Tổng tiền đã nạp</p>
+          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 md:text-2xl">{formatMoney(totalDeposit)}</h3>
+          <p className="mt-0.5 truncate text-[10px] font-medium text-blue-500 md:text-xs">Vốn gốc</p>
+        </div>
+
+        {/* Tổng Lãi/Lỗ */}
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-zinc-100 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-zinc-500 dark:text-zinc-400 md:text-sm">Tổng Lãi/Lỗ</p>
+          <div className="mt-1 flex items-baseline gap-1 truncate">
+            <span className={`truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
+            </span>
+            <span className={`text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>({formatPct(summary.totalReturnPct)})</span>
+          </div>
         </div>
       </div>
 
