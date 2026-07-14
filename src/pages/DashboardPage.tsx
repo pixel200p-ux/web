@@ -82,12 +82,10 @@ export function DashboardPage({ data }: { data: PortfolioData }) {
         {/* Tổng Lãi/Lỗ */}
         <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng Lãi/Lỗ</p>
-          <div className="mt-1 flex items-baseline gap-1 truncate">
-            <span className={`truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
-            </span>
-            <span className={`text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>({formatPct(summary.totalReturnPct)})</span>
-          </div>
+          <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${summary.totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
+          </h3>
+          <p className={`mt-0.5 truncate text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatPct(summary.totalReturnPct)}</p>
         </div>
       </div>
 

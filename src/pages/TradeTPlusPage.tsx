@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, StatCard, Badge, EmptyState, Button, Modal, Input, Select } from '../components/ui';
+import { Card, Badge, EmptyState, Button, Modal, Input, Select } from '../components/ui';
 import { showToast } from '../components/Toast';
 import { useSettings } from '../lib/settings';
 import type { PortfolioData } from '../lib/dataStore';
@@ -361,27 +361,29 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard
-          title="Tổng lợi nhuận T+"
-          value={formatMoney(tplusSummary.total_tplus_profit)}
-          trend={tplusSummary.total_tplus_profit >= 0 ? 'up' : 'down'}
-        />
-        <StatCard
-          title="Tổng hạ giá vốn"
-          value={`${tplusSummary.total_cost_reduction.toFixed(0)} ₫/cp`}
-          subtitle={`${tplusSummary.completed_cycles} chu kỳ hoàn tất`}
-        />
-        <StatCard
-          title="Chu kỳ đang mở"
-          value={String(tplusSummary.open_cycles)}
-          subtitle={`${tplusSummary.completed_cycles} đã hoàn tất`}
-        />
-        <StatCard
-          title="Tỷ lệ thắng"
-          value={`${tplusSummary.win_rate.toFixed(1)}%`}
-          trend={tplusSummary.win_rate >= 50 ? 'up' : 'down'}
-        />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng lợi nhuận T+</p>
+          <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${tplusSummary.total_tplus_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {tplusSummary.total_tplus_profit >= 0 ? '+' : ''}{formatMoney(tplusSummary.total_tplus_profit)}
+          </h3>
+        </div>
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng hạ giá vốn</p>
+          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{tplusSummary.total_cost_reduction.toFixed(0)} ₫/cp</h3>
+          <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400 md:text-xs">{tplusSummary.completed_cycles} chu kỳ hoàn tất</p>
+        </div>
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Chu kỳ đang mở</p>
+          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{tplusSummary.open_cycles}</h3>
+          <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400 md:text-xs">{tplusSummary.completed_cycles} đã hoàn tất</p>
+        </div>
+        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
+          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tỷ lệ thắng</p>
+          <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${tplusSummary.win_rate >= 50 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            {tplusSummary.win_rate.toFixed(1)}%
+          </h3>
+        </div>
       </div>
 
       {/* Quick Filters */}
