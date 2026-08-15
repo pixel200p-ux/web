@@ -1,347 +1,857 @@
-/*
-# Portfolio Manager - Core Database Schema
+import { useState } from 'react';
+import { Card, Table, Badge, EmptyState } from '../components/ui';
+import { formatPct, type PortfolioData } from '../lib/dataStore';
+import { netDepositFromTransactions } from '../engine/calc';
+import { useSettings } from '../lib/settings';
 
-## Overview
-Creates the complete database schema for the Portfolio Manager system following the
-transaction-driven architecture: transactions are the source of truth, holdings and
-cash balances are derived state, performance is calculated by the engine.
+const CATEGORY_LABELS: Record<string, string> = {
+  STOCK: 'Stock',
+  CRYPTO: 'Crypto',
+  ETF: 'ETF',
+  FUND: 'DCDS',
+  BANK_DEPOSIT: 'Bank',
+  CASH: 'Cash',
+};
 
-## New Tables
+const CATEGORY_COLORS: Record<string, string> = {
+  STOCK: '#3b82f6',
+  CRYPTO: '#f59e0b',
+  ETF: '#10b981',
+  FUND: '#8b5cf6',
+  BANK_DEPOSIT: '#ec4899',
+  CASH: '#64748b',
+};
 
-1. **accounts** - Broker/wallet/bank accounts (VPS, SSI, Binance, etc.)
-   - user_id (owner), account_name, account_type (STOCK/CRYPTO/ETF/DCDS/BANK), broker, currency
+const DONUT_RADIUS = 80;
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 
-2. **assets** - Individual assets within accounts (MBB, BTC, E1VFVN30, etc.)
-   - account_id, asset_type, symbol, name, category, currency
+export function DashboardPage({ data }: { data: PortfolioData }) {
+  const { summary, transactions, targetAllocation } = data;
+  const { formatMoney } = useSettings();
 
-3. **cash_balances** - Cash per account
-   - account_id, currency, available_cash, pending_cash
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
 
-4. **holdings** - Current ownership state per asset
-   - asset_id, quantity, average_cost, current_price
+  /*
+   * Giữ thứ tự giống giao diện mẫu:
+   * Stock → Crypto → ETF → DCDS → Bank → Cash
+   */
+  const categoryKeys = [
+    'STOCK',
+    'CRYPTO',
+    'ETF',
+    'FUND',
+    'BANK_DEPOSIT',
+    'CASH',
+  ];
 
-5. **transactions** - Source of truth: all BUY/SELL/DEPOSIT/WITHDRAW/DIVIDEND/TRANSFER/SWAP
-   - account_id, asset_id, transaction_type, quantity, price, amount, fee, tax, transaction_date, status, settlement_date
+  const allocData = categoryKeys
+    .map((key) => ({
+      key,
+      label: CATEGORY_LABELS[key],
+      pct: summary.allocation[key] || 0,
+      value: summary.categoryBreakdown[key] || 0,
+      color: CATEGORY_COLORS[key],
+    }))
+    .filter((item) => item.value > 0 || item.pct > 0);
 
-6. **income_records** - Dividends, interest, distributions
-   - asset_id, income_type, amount, date, transaction_id
+  /*
+   * Tổng tiền đã nạp = Tổng Deposit - Tổng Withdraw.
+   *
+   * Không bao gồm:
+   * - Realized Profit
+   * - Unrealized Profit
+   * - Interest
+   * - Dividends
+   * - Asset Appreciation
+   * - Trade T+ Profit
+   */
+  const netDeposits = netDepositFromTransactions(transactions);
 
-7. **expense_records** - Fees, taxes, management fees
-   - asset_id, expense_type, amount, date, transaction_id
+  const recentTxs = [...transactions]
+    .sort((a, b) =>
+      b.transaction_date.localeCompare(a.transaction_date)
+    )
+    .slice(0, 8);
 
-8. **price_history** - Market price snapshots
-   - asset_id, price, source, timestamp
+  /*
+   * Tính vị trí bắt đầu của từng segment.
+   * Dùng cho tooltip/mũi tên khi hover.
+   */
+  let cumulativePct = 0;
 
-9. **audit_logs** - All system changes
-   - user_id, action, module, before_data, after_data, timestamp
+  const chartData = allocData.map((item) => {
+    const startPct = cumulativePct;
+    const endPct = cumulativePct + item.pct;
 
-10. **settings** - User configuration (target allocation, theme, currency)
-    - user_id, key, value
+    cumulativePct = endPct;
 
-## Security
-- RLS enabled on ALL tables
-- Owner-scoped policies (auth.uid() = user_id) for all CRUD
-- user_id columns default to auth.uid() so inserts work without explicit user_id
-*/ 
+    return {
+      ...item,
+      startPct,
+      endPct,
+      middlePct: startPct + item.pct / 2,
+    };
+  });
 
--- Accounts table
-CREATE TABLE IF NOT EXISTS accounts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
-  account_name text NOT NULL,
-  account_type text NOT NULL CHECK (account_type IN ('STOCK','CRYPTO','ETF','DCDS','BANK')),
-  broker text,
-  currency text NOT NULL DEFAULT 'VND',
-  status text NOT NULL DEFAULT 'ACTIVE',
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+  const hoveredItem = hoveredCategory
+    ? chartData.find((item) => item.key === hoveredCategory) || null
+    : null;
 
-DROP POLICY IF EXISTS "select_own_accounts" ON accounts;
-CREATE POLICY "select_own_accounts" ON accounts FOR SELECT
-  TO authenticated USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "insert_own_accounts" ON accounts;
-CREATE POLICY "insert_own_accounts" ON accounts FOR INSERT
-  TO authenticated WITH CHECK (auth.uid() = user_id);
-DROP POLICY IF EXISTS "update_own_accounts" ON accounts;
-CREATE POLICY "update_own_accounts" ON accounts FOR UPDATE
-  TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-DROP POLICY IF EXISTS "delete_own_accounts" ON accounts;
-CREATE POLICY "delete_own_accounts" ON accounts FOR DELETE
-  TO authenticated USING (auth.uid() = user_id);
+  /*
+   * Tính vị trí tooltip theo vị trí trung tâm của segment đang hover.
+   */
+  const getTooltipPosition = (middlePct: number) => {
+    const angle = (middlePct / 100) * Math.PI * 2 - Math.PI / 2;
 
--- Assets table
-CREATE TABLE IF NOT EXISTS assets (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  asset_type text NOT NULL CHECK (asset_type IN ('STOCK','CRYPTO','ETF','FUND','BANK_DEPOSIT')),
-  symbol text NOT NULL,
-  name text,
-  category text,
-  currency text NOT NULL DEFAULT 'VND',
-  status text NOT NULL DEFAULT 'ACTIVE',
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
+    const pointRadius = 82;
+    const tooltipRadius = 116;
 
-DROP POLICY IF EXISTS "select_own_assets" ON assets;
-CREATE POLICY "select_own_assets" ON assets FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = assets.account_id AND accounts.user_id = auth.uid())
+    const pointX = 100 + Math.cos(angle) * pointRadius;
+    const pointY = 100 + Math.sin(angle) * pointRadius;
+
+    const tooltipX = 100 + Math.cos(angle) * tooltipRadius;
+    const tooltipY = 100 + Math.sin(angle) * tooltipRadius;
+
+    return {
+      pointX,
+      pointY,
+      tooltipX,
+      tooltipY,
+    };
+  };
+
+  return (
+    <div className="min-w-0 space-y-5 sm:space-y-6">
+
+      {/* =====================================================
+          HEADER
+      ====================================================== */}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
+            Dashboard
+          </h1>
+
+          <p className="mt-1 text-sm text-slate-400">
+            Tổng quan toàn bộ danh mục đầu tư
+          </p>
+        </div>
+      </div>
+
+
+      {/* =====================================================
+          SUMMARY CARDS
+      ====================================================== */}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+
+        {/* Tổng tài sản */}
+        <DashboardStatCard
+          title="Tổng tài sản"
+          value={formatMoney(summary.totalAsset)}
+          subtitle={formatPct(summary.totalReturnPct)}
+          subtitleClass={
+            summary.totalReturnPct < 0
+              ? 'text-rose-500'
+              : 'text-emerald-400'
+          }
+        />
+
+        {/* Cash */}
+        <DashboardStatCard
+          title="Cash"
+          value={formatMoney(summary.totalCash)}
+          subtitle={`${(
+            summary.allocation.CASH || 0
+          ).toFixed(1)}% tổng tài sản`}
+        />
+
+        {/* Tổng tiền đã nạp */}
+        <DashboardStatCard
+          title="Tổng tiền đã nạp"
+          value={formatMoney(netDeposits)}
+          subtitle="Vốn gốc"
+        />
+
+        {/* Tổng Lãi/Lỗ */}
+        <DashboardStatCard
+          title="Tổng Lãi/Lỗ"
+          value={formatMoney(summary.totalPnL)}
+          subtitle={formatPct(summary.totalReturnPct)}
+          subtitleClass={
+            summary.totalPnL < 0
+              ? 'text-rose-500'
+              : 'text-emerald-400'
+          }
+        />
+
+      </div>
+
+
+      {/* =====================================================
+          ALLOCATION + CATEGORY SUMMARY
+      ====================================================== */}
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+
+
+        {/* =================================================
+            PHÂN BỔ TÀI SẢN
+        ================================================== */}
+
+        <Card
+          className="
+            !rounded-2xl
+            !border-slate-700/90
+            !bg-[#17243d]
+            !p-5
+            shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+            sm:!p-6
+          "
+        >
+
+          <h2 className="mb-5 text-sm font-semibold text-slate-100 sm:text-base">
+            Phân bổ tài sản
+          </h2>
+
+
+          <div
+            className="
+              grid
+              grid-cols-1
+              items-center
+              gap-5
+              md:grid-cols-[minmax(250px,1fr)_minmax(220px,0.9fr)]
+            "
+          >
+
+            {/* =============================================
+                DONUT CHART
+            ============================================== */}
+
+            <div className="relative flex min-h-[270px] items-center justify-center">
+
+              <svg
+                width="280"
+                height="280"
+                viewBox="0 0 200 200"
+                className="
+                  h-[250px]
+                  w-[250px]
+                  max-w-full
+                  overflow-visible
+                  sm:h-[280px]
+                  sm:w-[280px]
+                "
+                role="img"
+                aria-label="Biểu đồ phân bổ tài sản"
+              >
+
+                {/* Background ring */}
+
+                <circle
+                  cx="100"
+                  cy="100"
+                  r={DONUT_RADIUS}
+                  fill="none"
+                  stroke="#263650"
+                  strokeWidth="20"
+                />
+
+
+                {/* =========================================
+                    DONUT SEGMENTS
+                ========================================== */}
+
+                {chartData.map((item) => {
+                  const dash =
+                    (item.pct / 100) *
+                    DONUT_CIRCUMFERENCE;
+
+                  const offset =
+                    -(item.startPct *
+                      DONUT_CIRCUMFERENCE) /
+                    100;
+
+                  const active =
+                    hoveredCategory === item.key;
+
+                  const hasHover =
+                    hoveredCategory !== null;
+
+                  return (
+                    <circle
+                      key={item.key}
+                      cx="100"
+                      cy="100"
+                      r={DONUT_RADIUS}
+                      fill="none"
+                      stroke={item.color}
+                      strokeWidth={
+                        active
+                          ? 25
+                          : hasHover
+                            ? 18
+                            : 20
+                      }
+                      strokeDasharray={`${dash} ${
+                        DONUT_CIRCUMFERENCE - dash
+                      }`}
+                      strokeDashoffset={offset}
+                      transform="rotate(-90 100 100)"
+                      className="
+                        cursor-pointer
+                        transition-all
+                        duration-200
+                      "
+                      style={{
+                        opacity:
+                          hasHover && !active
+                            ? 0.42
+                            : 1,
+
+                        filter: active
+                          ? `drop-shadow(0 0 5px ${item.color})`
+                          : 'none',
+                      }}
+                      onMouseEnter={() =>
+                        setHoveredCategory(item.key)
+                      }
+                      onMouseLeave={() =>
+                        setHoveredCategory(null)
+                      }
+                    />
+                  );
+                })}
+
+
+                {/* =========================================
+                    CENTER OF DONUT
+                ========================================== */}
+
+                <circle
+                  cx="100"
+                  cy="100"
+                  r="59"
+                  fill="#17243d"
+                  className="pointer-events-none"
+                />
+
+                <text
+                  x="100"
+                  y="94"
+                  textAnchor="middle"
+                  className="
+                    pointer-events-none
+                    fill-slate-400
+                    text-[10px]
+                  "
+                >
+                  Tổng
+                </text>
+
+                <text
+                  x="100"
+                  y="114"
+                  textAnchor="middle"
+                  className="
+                    pointer-events-none
+                    fill-slate-100
+                    text-[11px]
+                    font-bold
+                  "
+                >
+                  {formatMoney(summary.totalAsset)}
+                </text>
+
+
+                {/* =========================================
+                    HOVER TOOLTIP
+                ========================================== */}
+
+                {hoveredItem &&
+                  (() => {
+                    const position =
+                      getTooltipPosition(
+                        hoveredItem.middlePct
+                      );
+
+                    /*
+                     * Giới hạn tooltip để không bị quá sát mép.
+                     */
+                    const tooltipX = Math.max(
+                      58,
+                      Math.min(
+                        142,
+                        position.tooltipX
+                      )
+                    );
+
+                    const tooltipY = Math.max(
+                      15,
+                      Math.min(
+                        185,
+                        position.tooltipY
+                      )
+                    );
+
+                    const direction =
+                      tooltipX >= 100 ? 1 : -1;
+
+                    const boxWidth = 82;
+                    const boxHeight = 25;
+
+                    const boxX =
+                      tooltipX -
+                      (boxWidth / 2);
+
+                    const boxY =
+                      tooltipY -
+                      (boxHeight / 2);
+
+                    /*
+                     * Điểm nối từ segment → tooltip.
+                     */
+                    const lineEndX =
+                      tooltipX -
+                      direction * 39;
+
+                    return (
+                      <g className="pointer-events-none">
+
+                        {/* Mũi tên / đường chỉ */}
+                        <line
+                          x1={position.pointX}
+                          y1={position.pointY}
+                          x2={lineEndX}
+                          y2={tooltipY}
+                          stroke={hoveredItem.color}
+                          strokeWidth="1.5"
+                        />
+
+                        {/* Đầu mũi tên */}
+                        <polygon
+                          points={
+                            direction > 0
+                              ? `${position.pointX},${position.pointY}
+                                 ${position.pointX - 5},${position.pointY - 3}
+                                 ${position.pointX - 5},${position.pointY + 3}`
+                              : `${position.pointX},${position.pointY}
+                                 ${position.pointX + 5},${position.pointY - 3}
+                                 ${position.pointX + 5},${position.pointY + 3}`
+                          }
+                          fill={hoveredItem.color}
+                        />
+
+                        {/* Tooltip box */}
+                        <rect
+                          x={boxX}
+                          y={boxY}
+                          width={boxWidth}
+                          height={boxHeight}
+                          rx="6"
+                          fill="#0f1b30"
+                          stroke={hoveredItem.color}
+                          strokeWidth="1"
+                        />
+
+                        {/* Tên nhóm */}
+                        <text
+                          x={tooltipX}
+                          y={tooltipY - 3}
+                          textAnchor="middle"
+                          className="
+                            fill-slate-400
+                            text-[6px]
+                          "
+                        >
+                          {hoveredItem.label}
+                        </text>
+
+                        {/* Giá trị */}
+                        <text
+                          x={tooltipX}
+                          y={tooltipY + 7}
+                          textAnchor="middle"
+                          className="
+                            fill-slate-100
+                            text-[7px]
+                            font-bold
+                          "
+                        >
+                          {formatMoney(
+                            hoveredItem.value
+                          )}
+                        </text>
+
+                      </g>
+                    );
+                  })()}
+
+              </svg>
+
+            </div>
+
+
+            {/* =============================================
+                LEGEND
+            ============================================== */}
+
+            <div className="space-y-2">
+
+              {chartData.map((item) => {
+                const target =
+                  targetAllocation[
+                    item.key as keyof typeof targetAllocation
+                  ];
+
+                const active =
+                  hoveredCategory === item.key;
+
+                return (
+                  <div
+                    key={item.key}
+                    className={`
+                      flex
+                      cursor-pointer
+                      items-center
+                      justify-between
+                      gap-3
+                      rounded-lg
+                      px-2
+                      py-1.5
+                      transition-all
+                      duration-200
+                      ${
+                        active
+                          ? 'bg-slate-800/80'
+                          : ''
+                      }
+                    `}
+                    onMouseEnter={() =>
+                      setHoveredCategory(item.key)
+                    }
+                    onMouseLeave={() =>
+                      setHoveredCategory(null)
+                    }
+                  >
+
+                    <div className="flex min-w-0 items-center gap-2">
+
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            item.color,
+                        }}
+                      />
+
+                      <span className="truncate text-sm text-slate-300">
+                        {item.label}
+                      </span>
+
+                    </div>
+
+
+                    <div className="flex shrink-0 items-center gap-2">
+
+                      <span className="text-sm font-semibold text-slate-100">
+                        {item.pct.toFixed(1)}%
+                      </span>
+
+                      {target !== undefined && (
+                        <span
+                          className="
+                            hidden
+                            rounded
+                            bg-amber-500/15
+                            px-1.5
+                            py-1
+                            text-[10px]
+                            font-medium
+                            text-amber-400
+                            sm:inline-flex
+                          "
+                        >
+                          Mục tiêu: {target}%
+                        </span>
+                      )}
+
+                    </div>
+
+                  </div>
+                );
+              })}
+
+            </div>
+
+          </div>
+
+        </Card>
+
+
+        {/* =================================================
+            TỔNG HỢP THEO NHÓM
+        ================================================== */}
+
+        <Card
+          className="
+            !rounded-2xl
+            !border-slate-700/90
+            !bg-[#17243d]
+            !p-5
+            shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+            sm:!p-6
+          "
+        >
+
+          <h2 className="mb-5 text-sm font-semibold text-slate-100 sm:text-base">
+            Tổng hợp theo nhóm
+          </h2>
+
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+            {chartData
+              .filter(
+                (item) => item.key !== 'CASH'
+              )
+              .map((item) => (
+
+                <div
+                  key={item.key}
+                  className="
+                    rounded-xl
+                    border
+                    border-slate-700
+                    bg-[#192741]
+                    p-4
+                    transition-colors
+                    hover:border-slate-600
+                  "
+                >
+
+                  <div className="flex items-center gap-2">
+
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{
+                        backgroundColor:
+                          item.color,
+                      }}
+                    />
+
+                    <span className="text-xs text-slate-400 sm:text-sm">
+                      {item.label}
+                    </span>
+
+                  </div>
+
+
+                  <p className="mt-2 text-base font-bold text-slate-100 sm:text-lg">
+                    {formatMoney(item.value)}
+                  </p>
+
+
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {item.pct.toFixed(1)}% danh mục
+                  </p>
+
+                </div>
+
+              ))}
+
+          </div>
+
+        </Card>
+
+      </div>
+
+
+      {/* =====================================================
+          GIAO DỊCH GẦN ĐÂY
+      ====================================================== */}
+
+      <Card
+        className="
+          !rounded-2xl
+          !border-slate-700/90
+          !bg-[#17243d]
+          !p-4
+          shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+          sm:!p-5
+        "
+      >
+
+        <h2 className="mb-4 text-sm font-semibold text-slate-100 sm:text-base">
+          Giao dịch gần đây
+        </h2>
+
+
+        {recentTxs.length === 0 ? (
+          <EmptyState message="Chưa có giao dịch nào" />
+        ) : (
+          <div className="overflow-x-auto">
+
+            <Table
+              columns={[
+                {
+                  key: 'date',
+                  label: 'Ngày',
+                },
+                {
+                  key: 'type',
+                  label: 'Loại',
+                },
+                {
+                  key: 'asset',
+                  label: 'Tài sản',
+                },
+                {
+                  key: 'amount',
+                  label: 'Giá trị',
+                  align: 'right',
+                },
+                {
+                  key: 'status',
+                  label: 'Trạng thái',
+                  align: 'center',
+                },
+              ]}
+              rows={recentTxs}
+              renderRow={(tx) => {
+
+                const asset =
+                  data.assets.find(
+                    (a) => a.id === tx.asset_id
+                  );
+
+                return {
+                  date: tx.transaction_date,
+
+                  type: (
+                    <Badge
+                      variant={
+                        tx.transaction_type ===
+                        'BUY'
+                          ? 'info'
+                          : tx.transaction_type ===
+                              'SELL'
+                            ? 'warning'
+                            : tx.transaction_type ===
+                                'DEPOSIT'
+                              ? 'success'
+                              : 'default'
+                      }
+                    >
+                      {tx.transaction_type}
+                    </Badge>
+                  ),
+
+                  asset:
+                    asset?.symbol || 'Cash',
+
+                  amount: (
+                    <span className="whitespace-nowrap text-slate-200">
+                      {formatMoney(tx.amount)}
+                    </span>
+                  ),
+
+                  status: (
+                    <Badge
+                      variant={
+                        tx.status ===
+                        'COMPLETED'
+                          ? 'success'
+                          : 'warning'
+                      }
+                    >
+                      {tx.status === 'COMPLETED'
+                        ? 'Hoàn tất'
+                        : 'Chờ'}
+                    </Badge>
+                  ),
+                };
+              }}
+            />
+
+          </div>
+        )}
+
+      </Card>
+
+    </div>
   );
-DROP POLICY IF EXISTS "insert_own_assets" ON assets;
-CREATE POLICY "insert_own_assets" ON assets FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = assets.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "update_own_assets" ON assets;
-CREATE POLICY "update_own_assets" ON assets FOR UPDATE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = assets.account_id AND accounts.user_id = auth.uid())
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = assets.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "delete_own_assets" ON assets;
-CREATE POLICY "delete_own_assets" ON assets FOR DELETE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = assets.account_id AND accounts.user_id = auth.uid())
-  );
+}
 
--- Cash balances table
-CREATE TABLE IF NOT EXISTS cash_balances (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  currency text NOT NULL DEFAULT 'VND',
-  available_cash numeric(20,2) NOT NULL DEFAULT 0,
-  pending_cash numeric(20,2) NOT NULL DEFAULT 0,
-  updated_at timestamptz DEFAULT now()
-);
-ALTER TABLE cash_balances ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "select_own_cash" ON cash_balances;
-CREATE POLICY "select_own_cash" ON cash_balances FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = cash_balances.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "insert_own_cash" ON cash_balances;
-CREATE POLICY "insert_own_cash" ON cash_balances FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = cash_balances.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "update_own_cash" ON cash_balances;
-CREATE POLICY "update_own_cash" ON cash_balances FOR UPDATE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = cash_balances.account_id AND accounts.user_id = auth.uid())
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = cash_balances.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "delete_own_cash" ON cash_balances;
-CREATE POLICY "delete_own_cash" ON cash_balances FOR DELETE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = cash_balances.account_id AND accounts.user_id = auth.uid())
-  );
+/* ============================================================
+   SUMMARY CARD
+============================================================ */
 
--- Holdings table
-CREATE TABLE IF NOT EXISTS holdings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-  quantity numeric(20,8) NOT NULL DEFAULT 0,
-  average_cost numeric(20,4) NOT NULL DEFAULT 0,
-  current_price numeric(20,4) NOT NULL DEFAULT 0,
-  updated_at timestamptz DEFAULT now()
-);
-ALTER TABLE holdings ENABLE ROW LEVEL SECURITY;
+function DashboardStatCard({
+  title,
+  value,
+  subtitle,
+  subtitleClass = 'text-slate-500',
+}: {
+  title: string;
+  value: string;
+  subtitle?: string;
+  subtitleClass?: string;
+}) {
 
-DROP POLICY IF EXISTS "select_own_holdings" ON holdings;
-CREATE POLICY "select_own_holdings" ON holdings FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = holdings.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "insert_own_holdings" ON holdings;
-CREATE POLICY "insert_own_holdings" ON holdings FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = holdings.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "update_own_holdings" ON holdings;
-CREATE POLICY "update_own_holdings" ON holdings FOR UPDATE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = holdings.asset_id AND accounts.user_id = auth.uid())
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = holdings.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "delete_own_holdings" ON holdings;
-CREATE POLICY "delete_own_holdings" ON holdings FOR DELETE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = holdings.asset_id AND accounts.user_id = auth.uid())
-  );
+  return (
+    <div
+      className="
+        min-w-0
+        rounded-xl
+        border
+        border-slate-700/90
+        bg-[#17243d]
+        px-4
+        py-4
+        shadow-[0_6px_18px_rgba(0,0,0,0.14)]
+        sm:px-5
+        sm:py-5
+      "
+    >
 
--- Transactions table (source of truth)
-CREATE TABLE IF NOT EXISTS transactions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  asset_id uuid REFERENCES assets(id) ON DELETE SET NULL,
-  transaction_type text NOT NULL CHECK (transaction_type IN ('BUY','SELL','DEPOSIT','WITHDRAW','DIVIDEND','TRANSFER','SWAP','INTEREST','FEE','TAX')),
-  quantity numeric(20,8),
-  price numeric(20,4),
-  amount numeric(20,2) NOT NULL DEFAULT 0,
-  fee numeric(20,2) DEFAULT 0,
-  tax numeric(20,2) DEFAULT 0,
-  transaction_date date NOT NULL DEFAULT CURRENT_DATE,
-  settlement_date date,
-  status text NOT NULL DEFAULT 'COMPLETED' CHECK (status IN ('PENDING','COMPLETED','CANCELLED')),
-  notes text,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+      <p className="text-xs font-medium text-slate-400 sm:text-sm">
+        {title}
+      </p>
 
-DROP POLICY IF EXISTS "select_own_transactions" ON transactions;
-CREATE POLICY "select_own_transactions" ON transactions FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = transactions.account_id AND accounts.user_id = auth.uid())
+
+      <p
+        className="
+          mt-2
+          truncate
+          text-lg
+          font-bold
+          tracking-tight
+          text-slate-100
+          sm:text-xl
+        "
+      >
+        {value}
+      </p>
+
+
+      {subtitle && (
+        <p
+          className={`
+            mt-1
+            text-[11px]
+            font-medium
+            sm:text-xs
+            ${subtitleClass}
+          `}
+        >
+          {subtitle}
+        </p>
+      )}
+
+    </div>
   );
-DROP POLICY IF EXISTS "insert_own_transactions" ON transactions;
-CREATE POLICY "insert_own_transactions" ON transactions FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = transactions.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "update_own_transactions" ON transactions;
-CREATE POLICY "update_own_transactions" ON transactions FOR UPDATE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = transactions.account_id AND accounts.user_id = auth.uid())
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = transactions.account_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "delete_own_transactions" ON transactions;
-CREATE POLICY "delete_own_transactions" ON transactions FOR DELETE
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM accounts WHERE accounts.id = transactions.account_id AND accounts.user_id = auth.uid())
-  );
-
--- Income records
-CREATE TABLE IF NOT EXISTS income_records (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_id uuid REFERENCES assets(id) ON DELETE SET NULL,
-  income_type text NOT NULL CHECK (income_type IN ('DIVIDEND','INTEREST','DISTRIBUTION','YIELD','OTHER')),
-  amount numeric(20,2) NOT NULL,
-  income_date date NOT NULL DEFAULT CURRENT_DATE,
-  transaction_id uuid REFERENCES transactions(id) ON DELETE SET NULL,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE income_records ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "select_own_income" ON income_records;
-CREATE POLICY "select_own_income" ON income_records FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = income_records.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "insert_own_income" ON income_records;
-CREATE POLICY "insert_own_income" ON income_records FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = income_records.asset_id AND accounts.user_id = auth.uid())
-  );
-
--- Expense records
-CREATE TABLE IF NOT EXISTS expense_records (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_id uuid REFERENCES assets(id) ON DELETE SET NULL,
-  expense_type text NOT NULL CHECK (expense_type IN ('TRADING_FEE','TAX','MANAGEMENT_FEE','OTHER')),
-  amount numeric(20,2) NOT NULL,
-  expense_date date NOT NULL DEFAULT CURRENT_DATE,
-  transaction_id uuid REFERENCES transactions(id) ON DELETE SET NULL,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE expense_records ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "select_own_expenses" ON expense_records;
-CREATE POLICY "select_own_expenses" ON expense_records FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = expense_records.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "insert_own_expenses" ON expense_records;
-CREATE POLICY "insert_own_expenses" ON expense_records FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = expense_records.asset_id AND accounts.user_id = auth.uid())
-  );
-
--- Price history
-CREATE TABLE IF NOT EXISTS price_history (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-  price numeric(20,4) NOT NULL,
-  source text,
-  recorded_at timestamptz DEFAULT now()
-);
-ALTER TABLE price_history ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "select_own_prices" ON price_history;
-CREATE POLICY "select_own_prices" ON price_history FOR SELECT
-  TO authenticated USING (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = price_history.asset_id AND accounts.user_id = auth.uid())
-  );
-DROP POLICY IF EXISTS "insert_own_prices" ON price_history;
-CREATE POLICY "insert_own_prices" ON price_history FOR INSERT
-  TO authenticated WITH CHECK (
-    EXISTS (SELECT 1 FROM assets JOIN accounts ON accounts.id = assets.account_id
-           WHERE assets.id = price_history.asset_id AND accounts.user_id = auth.uid())
-  );
-
--- Audit logs
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
-  action text NOT NULL,
-  module text,
-  before_data jsonb,
-  after_data jsonb,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "select_own_audit" ON audit_logs;
-CREATE POLICY "select_own_audit" ON audit_logs FOR SELECT
-  TO authenticated USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "insert_own_audit" ON audit_logs;
-CREATE POLICY "insert_own_audit" ON audit_logs FOR INSERT
-  TO authenticated WITH CHECK (auth.uid() = user_id);
-
--- Settings
-CREATE TABLE IF NOT EXISTS user_settings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
-  key text NOT NULL,
-  value jsonb,
-  updated_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, key)
-);
-ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "select_own_settings" ON user_settings;
-CREATE POLICY "select_own_settings" ON user_settings FOR SELECT
-  TO authenticated USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "insert_own_settings" ON user_settings;
-CREATE POLICY "insert_own_settings" ON user_settings FOR INSERT
-  TO authenticated WITH CHECK (auth.uid() = user_id);
-DROP POLICY IF EXISTS "update_own_settings" ON user_settings;
-CREATE POLICY "update_own_settings" ON user_settings FOR UPDATE
-  TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-DROP POLICY IF EXISTS "delete_own_settings" ON user_settings;
-CREATE POLICY "delete_own_settings" ON user_settings FOR DELETE
-  TO authenticated USING (auth.uid() = user_id);
-
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
-CREATE INDEX IF NOT EXISTS idx_transactions_asset ON transactions(asset_id);
-CREATE INDEX IF NOT EXISTS idx_assets_account ON assets(account_id);
-CREATE INDEX IF NOT EXISTS idx_holdings_asset ON holdings(asset_id);
-CREATE INDEX IF NOT EXISTS idx_price_history_asset ON price_history(asset_id);
+}

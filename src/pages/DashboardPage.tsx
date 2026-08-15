@@ -1,219 +1,844 @@
+import { useState } from 'react';
 import { Card, Table, Badge, EmptyState } from '../components/ui';
-import { formatPct } from '../lib/dataStore';
+import { formatPct, type PortfolioData } from '../lib/dataStore';
+import { netDepositFromTransactions } from '../engine/calc';
 import { useSettings } from '../lib/settings';
-import type { PortfolioData } from '../lib/dataStore';
+
+const CATEGORY_LABELS: Record<string, string> = {
+  STOCK: 'Stock',
+  CRYPTO: 'Crypto',
+  ETF: 'ETF',
+  FUND: 'DCDS',
+  BANK_DEPOSIT: 'Bank',
+  CASH: 'Cash',
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  STOCK: '#8b5cf6',        // Tím
+  CRYPTO: '#f59e0b',       // Vàng / cam
+  ETF: '#94a3b8',          // Xám / bạc
+  FUND: '#22c55e',         // Xanh lá - DCDS
+  BANK_DEPOSIT: '#3b82f6', // Xanh dương - Bank
+  CASH: '#64748b',         // Xám xanh - Cash
+};
+
+const DONUT_RADIUS = 88;
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 
 export function DashboardPage({ data }: { data: PortfolioData }) {
   const { summary, transactions, targetAllocation } = data;
   const { formatMoney } = useSettings();
 
-  const categoryLabels: Record<string, string> = {
-    STOCK: 'Stock',
-    CRYPTO: 'Crypto',
-    ETF: 'ETF',
-    FUND: 'DCDS',
-    BANK_DEPOSIT: 'Bank',
-    CASH: 'Cash',
-  };
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+
+  /*
+   * Giữ thứ tự giống giao diện mẫu:
+   * Stock → Crypto → ETF → DCDS → Bank → Cash
+   */
+  const categoryKeys = [
+  'FUND',          // DCDS
+  'ETF',           // ETF
+  'STOCK',         // Stock
+  'BANK_DEPOSIT',  // Bank
+  'CRYPTO',        // Crypto
+  'CASH',          // Cash
+];
+
+  const allocData = categoryKeys
+    .map((key) => ({
+      key,
+      label: CATEGORY_LABELS[key],
+      pct: summary.allocation[key] || 0,
+      value: summary.categoryBreakdown[key] || 0,
+      color: CATEGORY_COLORS[key],
+    }))
+    .filter((item) => item.value > 0 || item.pct > 0);
+
+  /*
+   * Tổng tiền đã nạp = Tổng Deposit - Tổng Withdraw.
+   *
+   * Không bao gồm:
+   * - Realized Profit
+   * - Unrealized Profit
+   * - Interest
+   * - Dividends
+   * - Asset Appreciation
+   * - Trade T+ Profit
+   */
+  const netDeposits = netDepositFromTransactions(transactions);
 
   const recentTxs = [...transactions]
-    .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date))
+    .sort((a, b) =>
+      b.transaction_date.localeCompare(a.transaction_date)
+    )
     .slice(0, 8);
 
-  const allocData = Object.entries(summary.allocation).map(([key, pct]) => ({
-    key,
-    label: categoryLabels[key] || key,
-    pct,
-    value: summary.categoryBreakdown[key] || 0,
-  }));
-
-  const colors: Record<string, string> = {
-    STOCK: '#3b82f6',
-    CRYPTO: '#f59e0b',
-    ETF: '#10b981',
-    FUND: '#8b5cf6',
-    BANK_DEPOSIT: '#ec4899',
-    CASH: '#64748b',
-  };
-
+  /*
+   * Tính vị trí bắt đầu của từng segment.
+   * Dùng cho tooltip/mũi tên khi hover.
+   */
   let cumulativePct = 0;
-  const radius = 80;
-  const circumference = 2 * Math.PI * radius;
 
-  // Total deposits minus withdrawals — original capital only.
-  // Never includes realized/unrealized P&L, interest, dividends, or T+ profit.
-  const totalDeposit = transactions
-    .filter(t => t.transaction_type === 'DEPOSIT')
-    .reduce((s, t) => s + t.amount, 0)
-    - transactions
-      .filter(t => t.transaction_type === 'WITHDRAW')
-      .reduce((s, t) => s + t.amount, 0);
+  const chartData = allocData.map((item) => {
+    const startPct = cumulativePct;
+    const endPct = cumulativePct + item.pct;
 
+    cumulativePct = endPct;
+
+    return {
+      ...item,
+      startPct,
+      endPct,
+      middlePct: startPct + item.pct / 2,
+    };
+  });
+
+  const hoveredItem = hoveredCategory
+    ? chartData.find((item) => item.key === hoveredCategory) || null
+    : null;
+
+  /*
+   * Tính vị trí tooltip theo vị trí trung tâm của segment đang hover.
+   */
+  const getTooltipPosition = (middlePct: number) => {
+  const angle =
+    (middlePct / 100) * Math.PI * 2 - Math.PI / 2;
+
+  // Điểm mũi tên nằm ngay ngoài mép donut
+  const pointRadius = 112;
+
+  // Tooltip nằm xa hơn, không che biểu đồ
+  const tooltipRadius = 165;
+
+  const pointX =
+    100 + Math.cos(angle) * pointRadius;
+
+  const pointY =
+    100 + Math.sin(angle) * pointRadius;
+
+  const tooltipX =
+    100 + Math.cos(angle) * tooltipRadius;
+
+  const tooltipY =
+    100 + Math.sin(angle) * tooltipRadius;
+
+  return {
+    pointX,
+    pointY,
+    tooltipX,
+    tooltipY,
+  };
+};
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Tổng quan toàn bộ danh mục đầu tư</p>
+    <div className="min-w-0 space-y-5 sm:space-y-6">
+
+      {/* =====================================================
+          HEADER
+      ====================================================== */}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
+            Dashboard
+          </h1>
+
+          <p className="mt-1 text-sm text-slate-400">
+            Tổng quan toàn bộ danh mục đầu tư
+          </p>
+        </div>
       </div>
 
-      {/* KPI Cards — 2 cols on mobile, 4 on desktop, compact */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
+
+      {/* =====================================================
+          SUMMARY CARDS
+      ====================================================== */}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+
         {/* Tổng tài sản */}
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng tài sản</p>
-          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(summary.totalAsset)}</h3>
-          <p className={`mt-0.5 truncate text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatPct(summary.totalReturnPct)}</p>
-        </div>
+        <DashboardStatCard
+          title="Tổng tài sản"
+          value={formatMoney(summary.totalAsset)}
+          subtitle={formatPct(summary.totalReturnPct)}
+          subtitleClass={
+            summary.totalReturnPct < 0
+              ? 'text-rose-500'
+              : 'text-emerald-400'
+          }
+        />
 
         {/* Cash */}
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Cash</p>
-          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(summary.totalCash)}</h3>
-          <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400 md:text-xs">{summary.allocation.CASH?.toFixed(1) || 0}% tổng tài sản</p>
-        </div>
+        <DashboardStatCard
+          title="Cash"
+          value={formatMoney(summary.totalCash)}
+          subtitle={`${(
+            summary.allocation.CASH || 0
+          ).toFixed(1)}% tổng tài sản`}
+        />
 
         {/* Tổng tiền đã nạp */}
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng tiền đã nạp</p>
-          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(totalDeposit)}</h3>
-          <p className="mt-0.5 truncate text-[10px] font-medium text-blue-500 md:text-xs">Vốn gốc</p>
-        </div>
+        <DashboardStatCard
+          title="Tổng tiền đã nạp"
+          value={formatMoney(netDeposits)}
+          subtitle="Vốn gốc"
+        />
 
         {/* Tổng Lãi/Lỗ */}
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng Lãi/Lỗ</p>
-          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-white md:text-2xl">
-            {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
-          </h3>
-          <p className={`mt-0.5 truncate text-[10px] font-semibold md:text-xs ${summary.totalReturnPct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatPct(summary.totalReturnPct)}</p>
-        </div>
+        <DashboardStatCard
+          title="Tổng Lãi/Lỗ"
+          value={formatMoney(summary.totalPnL)}
+          subtitle={formatPct(summary.totalReturnPct)}
+          subtitleClass={
+            summary.totalPnL < 0
+              ? 'text-rose-500'
+              : 'text-emerald-400'
+          }
+        />
+
       </div>
 
-      {/* Allocation + Asset Summary */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Donut Chart */}
-        <Card className="lg:col-span-1">
-          <h3 className="mb-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Phân bổ tài sản</h3>
-          <div className="flex flex-col items-center">
-            <div className="relative">
-              <svg width="200" height="200" viewBox="0 0 200 200">
-                <circle cx="100" cy="100" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="20" className="dark:stroke-slate-700" />
-                {allocData.map((item) => {
-                  const dash = (item.pct / 100) * circumference;
-                  const offset = -cumulativePct * circumference / 100;
-                  cumulativePct += item.pct;
+
+      {/* =====================================================
+          ALLOCATION + CATEGORY SUMMARY
+      ====================================================== */}
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+
+
+        {/* =================================================
+            PHÂN BỔ TÀI SẢN
+        ================================================== */}
+
+        <Card
+          className="
+            !rounded-2xl
+            !border-slate-700/90
+            !bg-[#17243d]
+            !p-5
+            shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+            sm:!p-6
+          "
+        >
+
+          <h2 className="mb-5 text-sm font-semibold text-slate-100 sm:text-base">
+            Phân bổ tài sản
+          </h2>
+
+
+          <div
+            className="
+              grid
+              grid-cols-1
+              items-center
+              gap-5
+              md:grid-cols-[minmax(250px,1fr)_minmax(220px,0.9fr)]
+            "
+          >
+
+            {/* =============================================
+                DONUT CHART
+            ============================================== */}
+
+            <div className="relative flex min-h-[310px] items-center justify-center pt-8 pb-2">
+
+              <svg
+                 width="330"
+  height="330"
+  viewBox="-60 -60 320 320"
+                className="
+  h-[300px]
+  w-[300px]
+  max-w-full
+  overflow-visible
+  sm:h-[330px]
+  sm:w-[330px]
+"
+                role="img"
+                aria-label="Biểu đồ phân bổ tài sản"
+              >
+
+                {/* Background ring */}
+
+                <circle
+  cx="100"
+  cy="100"
+  r="64"
+  fill="#17243d"
+/>
+
+
+                {/* =========================================
+                    DONUT SEGMENTS
+                ========================================== */}
+
+                {chartData.map((item) => {
+                  const dash =
+                    (item.pct / 100) *
+                    DONUT_CIRCUMFERENCE;
+
+                  const offset =
+                    -(item.startPct *
+                      DONUT_CIRCUMFERENCE) /
+                    100;
+
+                  const active =
+                    hoveredCategory === item.key;
+
+                  const hasHover =
+                    hoveredCategory !== null;
+
                   return (
                     <circle
                       key={item.key}
                       cx="100"
                       cy="100"
-                      r={radius}
+                      r={DONUT_RADIUS}
                       fill="none"
-                      stroke={colors[item.key] || '#94a3b8'}
-                      strokeWidth="20"
-                      strokeDasharray={`${dash} ${circumference - dash}`}
+                      stroke={item.color}
+                  strokeWidth={
+  active
+    ? 58
+    : hasHover
+      ? 50
+      : 54
+}
+                      strokeDasharray={`${dash} ${
+                        DONUT_CIRCUMFERENCE - dash
+                      }`}
                       strokeDashoffset={offset}
                       transform="rotate(-90 100 100)"
+                      className="
+                        cursor-pointer
+                        transition-all
+                        duration-200
+                      "
+                      style={{
+                        opacity:
+                          hasHover && !active
+                            ? 0.42
+                            : 1,
+
+                        filter: active
+                          ? `drop-shadow(0 0 5px ${item.color})`
+                          : 'none',
+                      }}
+                      onMouseEnter={() =>
+                        setHoveredCategory(item.key)
+                      }
+                      onMouseLeave={() =>
+                        setHoveredCategory(null)
+                      }
                     />
                   );
                 })}
-                <text x="100" y="95" textAnchor="middle" className="fill-slate-400 text-xs">Tổng</text>
-                <text x="100" y="115" textAnchor="middle" className="fill-slate-700 dark:fill-slate-200 text-sm font-bold">
-                  {formatMoney(summary.totalAsset)}
-                </text>
+
+
+                {/* =========================================
+                    CENTER OF DONUT
+                ========================================== */}
+
+   <circle
+  cx="100"
+  cy="100"
+  r="64"
+  fill="#17243d"
+  className="pointer-events-none"
+/>
+
+<text
+  x="100"
+  y="94"
+  textAnchor="middle"
+  className="pointer-events-none fill-slate-400 text-[12px]"
+>
+  Tổng
+</text>
+
+<text
+  x="100"
+  y="114"
+  textAnchor="middle"
+  className="pointer-events-none fill-slate-100 text-[14px] font-bold"
+>
+  {formatMoney(summary.totalAsset)}
+</text>
+
+                {/* =========================================
+                    HOVER TOOLTIP
+                ========================================== */}
+
+                {hoveredItem &&
+  (() => {
+    const position = getTooltipPosition(
+      hoveredItem.middlePct
+    );
+
+    const direction =
+      position.tooltipX >= 100 ? 1 : -1;
+
+    const boxWidth = 125;
+    const boxHeight = 42;
+
+    /*
+     * Đẩy tooltip ra xa donut.
+     * Tooltip không nằm trên vòng biểu đồ.
+     */
+   const tooltipX = position.tooltipX;
+const tooltipY = position.tooltipY;
+
+    /*
+     * Giới hạn tooltip trong SVG để không bị cắt.
+     */
+  const safeTooltipX = tooltipX;
+const safeTooltipY = tooltipY;
+
+    const boxX =
+      safeTooltipX -
+      boxWidth / 2;
+
+    const boxY =
+      safeTooltipY -
+      boxHeight / 2;
+
+    /*
+     * Điểm cuối của đường nối.
+     * Luôn nằm bên ngoài donut.
+     */
+    const lineEndX =
+      safeTooltipX -
+      direction *
+        (boxWidth / 2);
+
+    return (
+      <g className="pointer-events-none">
+
+        {/* Đường nối từ biểu đồ tới tooltip */}
+        <line
+          x1={position.pointX}
+          y1={position.pointY}
+          x2={lineEndX}
+          y2={safeTooltipY}
+          stroke={hoveredItem.color}
+          strokeWidth="1.5"
+        />
+
+        {/* Mũi tên */}
+        <polygon
+          points={
+            direction > 0
+              ? `
+                ${position.pointX},${position.pointY}
+                ${position.pointX - 6},${position.pointY - 3}
+                ${position.pointX - 6},${position.pointY + 3}
+              `
+              : `
+                ${position.pointX},${position.pointY}
+                ${position.pointX + 6},${position.pointY - 3}
+                ${position.pointX + 6},${position.pointY + 3}
+              `
+          }
+          fill={hoveredItem.color}
+        />
+
+        {/* Tooltip */}
+        <rect
+  x={boxX}
+  y={boxY}
+  width={boxWidth}
+  height={boxHeight}
+  rx="6"
+  fill="#0f1b30"
+  stroke={hoveredItem.color}
+  strokeWidth="1"
+/>
+
+        {/* Tên danh mục */}
+        <text
+  x={safeTooltipX}
+  y={safeTooltipY - 7}
+  textAnchor="middle"
+  className="fill-slate-400 text-[12px]"
+>
+  {hoveredItem.label}
+</text>
+
+        {/* Giá trị */}
+        <text
+  x={safeTooltipX}
+  y={safeTooltipY + 10}
+  textAnchor="middle"
+  className="fill-slate-100 text-[12px] font-bold"
+>
+  {formatMoney(hoveredItem.value)}
+</text>
+
+      </g>
+    );
+  })()}
+
               </svg>
+
             </div>
-            <div className="mt-4 w-full space-y-2">
-              {allocData.map(item => (
-                <div key={item.key} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colors[item.key] || '#94a3b8' }} />
-                    <span className="text-slate-600 dark:text-slate-300">{item.label}</span>
+
+
+            {/* =============================================
+                LEGEND
+            ============================================== */}
+
+            <div className="space-y-2">
+
+              {chartData.map((item) => {
+                const target =
+                  targetAllocation[
+                    item.key as keyof typeof targetAllocation
+                  ];
+
+                const active =
+                  hoveredCategory === item.key;
+
+                return (
+                  <div
+                    key={item.key}
+                    className={`
+                      flex
+                      cursor-pointer
+                      items-center
+                      justify-between
+                      gap-3
+                      rounded-lg
+                      px-2
+                      py-1.5
+                      transition-all
+                      duration-200
+                      ${
+                        active
+                          ? 'bg-slate-800/80'
+                          : ''
+                      }
+                    `}
+                    onMouseEnter={() =>
+                      setHoveredCategory(item.key)
+                    }
+                    onMouseLeave={() =>
+                      setHoveredCategory(null)
+                    }
+                  >
+
+                    <div className="flex min-w-0 items-center gap-2">
+
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            item.color,
+                        }}
+                      />
+
+                      <span className="truncate text-sm text-slate-300">
+                        {item.label}
+                      </span>
+
+                    </div>
+
+
+                    <div className="flex shrink-0 items-center gap-2">
+
+                      <span className="text-sm font-semibold text-slate-100">
+                        {item.pct.toFixed(1)}%
+                      </span>
+
+                      {target !== undefined && (
+                        <span
+                          className="
+                            hidden
+                            rounded
+                            bg-amber-500/15
+                            px-1.5
+                            py-1
+                            text-[10px]
+                            font-medium
+                            text-amber-400
+                            sm:inline-flex
+                          "
+                        >
+                          Mục tiêu: {target}%
+                        </span>
+                      )}
+
+                    </div>
+
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-700 dark:text-slate-200">{item.pct.toFixed(1)}%</span>
-                    {targetAllocation[item.key as keyof typeof targetAllocation] !== undefined && (
-                      <Badge variant={Math.abs(item.pct - targetAllocation[item.key as keyof typeof targetAllocation]) > 5 ? 'warning' : 'success'}>
-                        Mục tiêu: {targetAllocation[item.key as keyof typeof targetAllocation]}%
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
+
             </div>
+
           </div>
+
         </Card>
 
-        {/* Asset Summary by Category */}
-        <Card className="lg:col-span-2">
-          <h3 className="mb-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Tổng hợp theo nhóm</h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {allocData.filter(a => a.key !== 'CASH').map(item => (
-              <div key={item.key} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colors[item.key] || '#94a3b8' }} />
-                  <span className="text-sm text-slate-500 dark:text-slate-400">{item.label}</span>
+
+        {/* =================================================
+            TỔNG HỢP THEO NHÓM
+        ================================================== */}
+
+        <Card
+          className="
+            !rounded-2xl
+            !border-slate-700/90
+            !bg-[#17243d]
+            !p-5
+            shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+            sm:!p-6
+          "
+        >
+
+          <h2 className="mb-5 text-sm font-semibold text-slate-100 sm:text-base">
+            Tổng hợp theo nhóm
+          </h2>
+
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+            {chartData
+              .filter(
+                (item) => item.key !== 'CASH'
+              )
+              .map((item) => (
+
+                <div
+                  key={item.key}
+                  className="
+                    rounded-xl
+                    border
+                    border-slate-700
+                    bg-[#192741]
+                    p-4
+                    transition-colors
+                    hover:border-slate-600
+                  "
+                >
+
+                  <div className="flex items-center gap-2">
+
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{
+                        backgroundColor:
+                          item.color,
+                      }}
+                    />
+
+                    <span className="text-xs text-slate-400 sm:text-sm">
+                      {item.label}
+                    </span>
+
+                  </div>
+
+
+                  <p className="mt-2 text-base font-bold text-slate-100 sm:text-lg">
+                    {formatMoney(item.value)}
+                  </p>
+
+
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {item.pct.toFixed(1)}% danh mục
+                  </p>
+
                 </div>
-                <p className="mt-2 text-lg font-bold text-slate-800 dark:text-slate-100">{formatMoney(item.value)}</p>
-                <p className="text-xs text-slate-400">{item.pct.toFixed(1)}% danh mục</p>
-              </div>
-            ))}
+
+              ))}
+
           </div>
+
         </Card>
+
       </div>
 
-      {/* Recent Transactions */}
-      <Card>
-        <h3 className="mb-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Giao dịch gần đây</h3>
+
+      {/* =====================================================
+          GIAO DỊCH GẦN ĐÂY
+      ====================================================== */}
+
+      <Card
+        className="
+          !rounded-2xl
+          !border-slate-700/90
+          !bg-[#17243d]
+          !p-4
+          shadow-[0_8px_24px_rgba(0,0,0,0.16)]
+          sm:!p-5
+        "
+      >
+
+        <h2 className="mb-4 text-sm font-semibold text-slate-100 sm:text-base">
+          Giao dịch gần đây
+        </h2>
+
+
         {recentTxs.length === 0 ? (
           <EmptyState message="Chưa có giao dịch nào" />
         ) : (
-          <Table
-            columns={[
-              { key: 'date', label: 'Ngày' },
-              { key: 'type', label: 'Loại' },
-              { key: 'asset', label: 'Tài sản' },
-              { key: 'amount', label: 'Giá trị', align: 'right' },
-              { key: 'status', label: 'Trạng thái', align: 'center' },
-            ]}
-            rows={recentTxs}
-            renderRow={(tx) => {
-              const asset = data.assets.find(a => a.id === tx.asset_id);
-              return {
-                date: tx.transaction_date,
-                type: <Badge variant={tx.transaction_type === 'BUY' ? 'info' : tx.transaction_type === 'SELL' ? 'warning' : tx.transaction_type === 'DEPOSIT' ? 'success' : 'default'}>{tx.transaction_type}</Badge>,
-                asset: asset?.symbol || 'Cash',
-                amount: <span className="whitespace-nowrap">{formatMoney(tx.amount)}</span>,
-                status: <Badge variant={tx.status === 'COMPLETED' ? 'success' : 'warning'}>{tx.status === 'COMPLETED' ? 'Hoàn tất' : 'Chờ'}</Badge>,
-              };
-            }}
-          />
+          <div className="overflow-x-auto">
+
+            <Table
+              columns={[
+                {
+                  key: 'date',
+                  label: 'Ngày',
+                },
+                {
+                  key: 'type',
+                  label: 'Loại',
+                },
+                {
+                  key: 'asset',
+                  label: 'Tài sản',
+                },
+                {
+                  key: 'amount',
+                  label: 'Giá trị',
+                  align: 'right',
+                },
+                {
+                  key: 'status',
+                  label: 'Trạng thái',
+                  align: 'center',
+                },
+              ]}
+              rows={recentTxs}
+              renderRow={(tx) => {
+
+                const asset =
+                  data.assets.find(
+                    (a) => a.id === tx.asset_id
+                  );
+
+                return {
+                  date: tx.transaction_date,
+
+                  type: (
+                    <Badge
+                      variant={
+                        tx.transaction_type ===
+                        'BUY'
+                          ? 'info'
+                          : tx.transaction_type ===
+                              'SELL'
+                            ? 'warning'
+                            : tx.transaction_type ===
+                                'DEPOSIT'
+                              ? 'success'
+                              : 'default'
+                      }
+                    >
+                      {tx.transaction_type}
+                    </Badge>
+                  ),
+
+                  asset:
+                    asset?.symbol || 'Cash',
+
+                  amount: (
+                    <span className="whitespace-nowrap text-slate-200">
+                      {formatMoney(tx.amount)}
+                    </span>
+                  ),
+
+                  status: (
+                    <Badge
+                      variant={
+                        tx.status ===
+                        'COMPLETED'
+                          ? 'success'
+                          : 'warning'
+                      }
+                    >
+                      {tx.status === 'COMPLETED'
+                        ? 'Hoàn tất'
+                        : 'Chờ'}
+                    </Badge>
+                  ),
+                };
+              }}
+            />
+
+          </div>
         )}
+
       </Card>
 
-      {/* Alerts */}
-      <Card>
-        <h3 className="mb-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Cảnh báo</h3>
-        <div className="space-y-2">
-          {allocData.filter(a => {
-            const target = targetAllocation[a.key as keyof typeof targetAllocation];
-            return target !== undefined && Math.abs(a.pct - target) > 5;
-          }).map(a => (
-            <div key={a.key} className="flex items-center gap-3 rounded-lg bg-amber-50 px-4 py-3 dark:bg-amber-900/20">
-              <svg className="h-5 w-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              <span className="text-sm text-amber-700 dark:text-amber-400">
-                {a.label} đang lệch {a.pct > (targetAllocation[a.key as keyof typeof targetAllocation] || 0) ? 'cao' : 'thấp'} hơn mục tiêu ({a.pct.toFixed(1)}% vs {targetAllocation[a.key as keyof typeof targetAllocation]}%)
-              </span>
-            </div>
-          ))}
-          {allocData.every(a => {
-            const target = targetAllocation[a.key as keyof typeof targetAllocation];
-            return target === undefined || Math.abs(a.pct - target) <= 5;
-          }) && (
-            <EmptyState message="Không có cảnh báo nào" />
-          )}
-        </div>
-      </Card>
+    </div>
+  );
+}
+
+
+/* ============================================================
+   SUMMARY CARD
+============================================================ */
+
+function DashboardStatCard({
+  title,
+  value,
+  subtitle,
+  subtitleClass = 'text-slate-500',
+}: {
+  title: string;
+  value: string;
+  subtitle?: string;
+  subtitleClass?: string;
+}) {
+
+  return (
+    <div
+      className="
+        min-w-0
+        rounded-xl
+        border
+        border-slate-700/90
+        bg-[#17243d]
+        px-4
+        py-4
+        shadow-[0_6px_18px_rgba(0,0,0,0.14)]
+        sm:px-5
+        sm:py-5
+      "
+    >
+
+      <p className="text-xs font-medium text-slate-400 sm:text-sm">
+        {title}
+      </p>
+
+
+      <p
+        className="
+          mt-2
+          truncate
+          text-lg
+          font-bold
+          tracking-tight
+          text-slate-100
+          sm:text-xl
+        "
+      >
+        {value}
+      </p>
+
+
+      {subtitle && (
+        <p
+          className={`
+            mt-1
+            text-[11px]
+            font-medium
+            sm:text-xs
+            ${subtitleClass}
+          `}
+        >
+          {subtitle}
+        </p>
+      )}
+
     </div>
   );
 }
