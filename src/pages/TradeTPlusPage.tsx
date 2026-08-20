@@ -6,7 +6,14 @@ import type { PortfolioData } from '../lib/dataStore';
 import type { TPlusCycle, TPlusAssetAnalysis } from '../engine/tplus';
 
 type SortKey = 'remaining_loss' | 'cost_reduction' | 'pnl' | 'market_value' | 'alphabetical';
-type QuickFilter = 'ALL' | 'PROFITABLE' | 'LOSING' | 'NEAR_BREAK_EVEN' | 'OPEN_TPLUS' | 'COMPLETED_TPLUS';
+type QuickFilter =
+  | 'ALL'
+  | 'PROFITABLE'
+  | 'LOSING'
+  | 'NEAR_BREAK_EVEN'
+  | 'OPEN_TPLUS'
+  | 'COMPLETED_TPLUS'
+  | 'HISTORY';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'remaining_loss', label: 'Lỗ còn lại (lớn nhất)' },
@@ -23,6 +30,7 @@ const QUICK_FILTERS: { value: QuickFilter; label: string }[] = [
   { value: 'LOSING', label: 'Đang lỗ' },
   { value: 'OPEN_TPLUS', label: 'T+ đang mở' },
   { value: 'COMPLETED_TPLUS', label: 'T+ đã hoàn tất' },
+  { value: 'HISTORY', label: 'T+ History' },
 ];
 
 function sortAnalyses(analyses: TPlusAssetAnalysis[], sortKey: SortKey): TPlusAssetAnalysis[] {
@@ -180,11 +188,68 @@ function AssetCard({
   onBuy: (a: TPlusAssetAnalysis) => void;
   onSell: (a: TPlusAssetAnalysis) => void;
 }) {
-  const [showHistory, setShowHistory] = useState(false);
+  
   const [showOpenBuys, setShowOpenBuys] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const isCrypto = analysis.asset_type === 'CRYPTO';
-  const decimals = isCrypto ? 2 : 0;
+const quantityDecimals = isCrypto ? 4 : 0;
+const priceDecimals = isCrypto ? 2 : 0;
+  // ─── Trade T+ display calculations ─────────────────────────
+  // Tổng khối lượng các lệnh T+ đang mở
+  const tradeQuantity = analysis.open_buys.reduce(
+    (sum, order) => sum + order.buy_quantity,
+    0
+  );
+
+  // Khối lượng gốc = tổng vị thế hiện tại trừ phần T+ đang mở
+  const originalQuantity = Math.max(
+    analysis.remaining_quantity - tradeQuantity,
+    0
+  );
+
+  // Giá mua T+ gần nhất
+  const latestBuyPrice = analysis.open_buys.length > 0
+    ? analysis.open_buys[analysis.open_buys.length - 1].buy_price
+    : 0;
+
+const tradeCost = analysis.open_buys.reduce(
+  (sum, order) => sum + order.buy_quantity * order.buy_price,
+  0
+);
+
+const tradePrice =
+  tradeQuantity > 0
+    ? tradeCost / tradeQuantity
+    : 0;
+
+  // Giá gợi ý = giá mua T+ + 3% Stock / +5% Crypto
+  const tradeTargetPercent = isCrypto ? 0.05 : 0.03;
+
+  const averageTradePrice =
+    tradePrice > 0
+      ? tradePrice * (1 + tradeTargetPercent)
+      : 0;
+
+  // Tổng giá trị vốn sau khi cộng lệnh T+
+  const totalPositionQuantity =
+    originalQuantity + tradeQuantity;
+
+  const totalPositionCost =
+    originalQuantity * analysis.original_avg_cost +
+    tradeQuantity * tradePrice;
+
+  // Giá hòa vốn trước chi phí bán
+  const rawBreakEvenPrice =
+    totalPositionQuantity > 0
+      ? totalPositionCost / totalPositionQuantity
+      : 0;
+
+  // Dùng break_even_price của engine nếu có dữ liệu.
+  // Nếu chưa có thì dùng giá vốn bình quân của toàn bộ vị thế.
+  const tradeBreakEvenPrice =
+    analysis.break_even_price > 0
+      ? analysis.break_even_price
+      : rawBreakEvenPrice;
 
   return (
     <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
@@ -204,17 +269,41 @@ function AssetCard({
         <>
           {/* Core metrics grid */}
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <Metric label="Số lượng" value={analysis.remaining_quantity.toLocaleString()} />
-            <Metric label="Giá vốn gốc" value={formatMoney(analysis.original_avg_cost, { decimals })} />
-            <Metric label="Giá vốn hiện tại" value={formatMoney(analysis.current_avg_cost, { decimals })} />
-            <Metric label="Giá thị trường" value={formatMoney(analysis.current_price, { decimals })} />
-            <Metric label="Giá hòa vốn" value={formatMoney(analysis.break_even_price, { decimals })} />
-            <Metric label="P/L chưa thực hiện" value={formatMoney(analysis.remaining_unrealized_loss)} className={analysis.remaining_unrealized_loss >= 0 ? 'text-emerald-500' : 'text-rose-500'} />
-            <Metric label="Còn lỗ" value={formatMoney(analysis.remaining_unrealized_loss < 0 ? Math.abs(analysis.remaining_unrealized_loss) : 0)} className={analysis.remaining_unrealized_loss < 0 ? 'text-rose-500' : ''} />
-            <Metric label="Tổng hạ vốn" value={`${formatMoney(analysis.total_cost_reduction, { decimals })} (${analysis.total_cost_reduction_pct.toFixed(2)}%)`} className="text-emerald-500" />
-            <Metric label="Lợi nhuận T+" value={formatMoney(analysis.total_tplus_profit)} className={analysis.total_tplus_profit >= 0 ? 'text-emerald-500' : 'text-rose-500'} />
-            <Metric label="Bán hết hôm nay" value={formatMoney(analysis.profit_if_selling_today)} className={analysis.profit_if_selling_today >= 0 ? 'text-emerald-500' : 'text-rose-500'} />
-            <Metric label="Giá bán gợi ý" value={formatMoney(analysis.suggested_sell_price, { decimals })} className="text-blue-500" />
+                        {/* Trade T+ metrics */}
+            <Metric
+              label="Số lượng Trade"
+              value={`${tradeQuantity.toLocaleString('vi-VN', {
+  minimumFractionDigits: quantityDecimals,
+  maximumFractionDigits: quantityDecimals,
+})} / ${originalQuantity.toLocaleString('vi-VN', {
+  minimumFractionDigits: quantityDecimals,
+  maximumFractionDigits: quantityDecimals,
+})}`}
+            />
+
+            <Metric
+              label="Giá Trade"
+              value={
+                tradePrice > 0
+                  ? `${formatMoney(tradePrice, { decimals: priceDecimals })} / ${formatMoney(analysis.original_avg_cost, { decimals: priceDecimals })}`
+                  : `- / ${formatMoney(analysis.original_avg_cost, { decimals: priceDecimals })}`
+              }
+            />
+
+            <Metric
+  label="Bình quân"
+  value={formatMoney(tradeBreakEvenPrice, { decimals: priceDecimals })}
+/>
+
+<Metric
+  label="Giá đề xuất"
+  value={
+    averageTradePrice > 0
+      ? formatMoney(averageTradePrice, { decimals: priceDecimals })
+      : '-'
+  }
+  className="text-blue-500"
+/>
           </div>
 
           {/* Break-even progress bar */}
@@ -241,13 +330,19 @@ function AssetCard({
                         <span className="text-xs text-slate-400">{ob.buy_date}</span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                        <Metric label="Giá mua" value={formatMoney(ob.buy_price, { decimals })} />
-                        <Metric label="SL mua" value={ob.buy_quantity.toLocaleString()} />
-                        <Metric label="Giá hiện tại" value={formatMoney(ob.current_price, { decimals })} />
-                        <Metric label="Giá bán gợi ý" value={formatMoney(ob.suggested_sell_price, { decimals })} className="text-blue-500" />
-                        <Metric label="LN kỳ vọng" value={formatMoney(ob.expected_profit)} className="text-emerald-500" />
+                        <Metric label="Giá mua" value={formatMoney(ob.buy_price, { decimals: priceDecimals })} />
+                        <Metric
+  label="SL mua"
+  value={ob.buy_quantity.toLocaleString('vi-VN', {
+    minimumFractionDigits: quantityDecimals,
+    maximumFractionDigits: quantityDecimals,
+  })}
+/>
+                        <Metric label="Giá hiện tại" value={formatMoney(ob.current_price, { decimals: priceDecimals })} />
+                        <Metric label="Giá bán gợi ý" value={formatMoney(ob.suggested_sell_price, { decimals: priceDecimals })} className="text-blue-500" />
+                        <Metric label="LN kỳ vọng" value={formatMoney(ob.expected_profit, { decimals: priceDecimals })} className="text-emerald-500" />
                         <Metric label="KLV (%)" value={`${ob.expected_return_pct.toFixed(1)}%`} className="text-emerald-500" />
-                        <Metric label="Vốn sử dụng" value={formatMoney(ob.capital_used)} />
+                        <Metric label="Vốn sử dụng" value={formatMoney(ob.capital_used, { decimals: priceDecimals })} />
                       </div>
                     </div>
                   ))}
@@ -256,21 +351,7 @@ function AssetCard({
             </div>
           )}
 
-          {/* T+ History */}
-          <div className="mt-4">
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="flex w-full items-center justify-between text-sm font-medium text-slate-600 dark:text-slate-300"
-            >
-              <span>T+ History ({analysis.cycles.length})</span>
-              <svg className={`h-4 w-4 transition-transform ${showHistory ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            {showHistory && (
-              <div className="mt-3">
-                <CycleHistorySection cycles={analysis.cycles} formatMoney={formatMoney} decimals={decimals} />
-              </div>
-            )}
-          </div>
+          
 
           {/* Quick Trade Actions */}
           <div className="mt-4 flex gap-2">
@@ -286,12 +367,7 @@ function AssetCard({
                 Bán
               </span>
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowHistory(!showHistory)}>
-              <span className="flex items-center justify-center gap-1">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                T+ History
-              </span>
-            </Button>
+            
           </div>
         </>
       )}
@@ -304,6 +380,9 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
   const { tplusSummary } = data;
   const [sortKey, setSortKey] = useState<SortKey>('remaining_loss');
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('ALL');
+  const [historySymbol, setHistorySymbol] = useState('ALL');
+  
+
 
   // Quick trade modal state
   const [showTradeModal, setShowTradeModal] = useState(false);
@@ -313,6 +392,35 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
   const [tradePrice, setTradePrice] = useState('');
 
   const allAnalyses = tplusSummary.analyses;
+  // ─── T+ History tổng ────────────────────────────────────────
+const allCycles = allAnalyses.flatMap(a =>
+  a.cycles.map(cycle => ({
+    ...cycle,
+    symbol: a.symbol,
+    broker: a.broker,
+  }))
+);
+
+const historySymbols = Array.from(
+  new Set(allCycles.map(c => c.symbol))
+).sort();
+
+const filteredHistory =
+  historySymbol === 'ALL'
+    ? allCycles
+    : allCycles.filter(c => c.symbol === historySymbol);
+
+const openHistory = filteredHistory.filter(
+  c => c.status === 'OPEN'
+);
+
+const completedHistory = filteredHistory
+  .filter(c => c.status === 'COMPLETED')
+  .sort((a, b) =>
+    (b.sell_date || b.buy_date).localeCompare(
+      a.sell_date || a.buy_date
+    )
+  );
   const filteredAnalyses = applyQuickFilter(allAnalyses, quickFilter);
   const sortedAnalyses = sortAnalyses(filteredAnalyses, sortKey);
 
@@ -337,7 +445,11 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
     setTradeType('SELL');
     setTradeAsset(a);
     setTradeQty('');
-    setTradePrice(String(a.suggested_sell_price.toFixed(2)));
+    const decimals = a.asset_type === 'CRYPTO' ? 2 : 0;
+
+setTradePrice(
+  String(a.suggested_sell_price.toFixed(decimals))
+);
     setShowTradeModal(true);
   };
 
@@ -355,13 +467,28 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Trade T+</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Quản lý phục hồi hòa vốn & luân chuyển vốn T+</p>
-      </div>
+      <div className="flex items-start justify-between gap-4">
+  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(520px,1.5fr)] items-start">
+  {/* Tiêu đề */}
+  <div>
+    <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+      Trade T+
+    </h1>
+    <p className="text-sm text-slate-500 dark:text-slate-400">
+      Quản lý phục hồi hòa vốn & luân chuyển vốn T+
+    </p>
+  </div>
+
+  
+
+    
+</div>
+
+  
+</div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 md:gap-4">
         <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tổng lợi nhuận T+</p>
           <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${tplusSummary.total_tplus_profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
@@ -378,54 +505,278 @@ export function TradeTPlusPage({ data }: { data: PortfolioData }) {
           <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{tplusSummary.open_cycles}</h3>
           <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400 md:text-xs">{tplusSummary.completed_cycles} đã hoàn tất</p>
         </div>
-        <div className="flex min-h-[90px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[120px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Tỷ lệ thắng</p>
-          <h3 className={`mt-1 truncate text-base font-bold tracking-tight md:text-2xl ${tplusSummary.win_rate >= 50 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {tplusSummary.win_rate.toFixed(1)}%
-          </h3>
-        </div>
+        
       </div>
 
       {/* Quick Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        {QUICK_FILTERS.map(f => (
-          <button
-            key={f.value}
-            onClick={() => setQuickFilter(f.value)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-              quickFilter === f.value
-                ? 'bg-blue-500 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+<div className="flex flex-wrap items-center gap-2">
+  {QUICK_FILTERS.map(f => (
+    <button
+      key={f.value}
+      onClick={() => setQuickFilter(f.value)}
+      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+        quickFilter === f.value
+          ? 'bg-blue-500 text-white'
+          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
+      }`}
+    >
+      {f.label}
+    </button>
+  ))}
+</div>
 
-      {/* Sort */}
-      <div className="flex items-center gap-3">
-        <div className="w-56">
-          <Select label="" value={sortKey} onChange={(v) => setSortKey(v as SortKey)} options={SORT_OPTIONS} />
+{/* T+ History */}
+{quickFilter === 'HISTORY' && (
+  <Card>
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+        T+ History
+      </h3>
+
+      <div className="w-40">
+        <Select
+          label=""
+          value={historySymbol}
+          onChange={setHistorySymbol}
+          options={[
+            { value: 'ALL', label: 'Tất cả mã' },
+            ...historySymbols.map(symbol => ({
+              value: symbol,
+              label: symbol,
+            })),
+          ]}
+        />
+      </div>
+    </div>
+
+    <div className="space-y-4">
+
+      {/* Chưa chốt */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+            Chưa chốt
+          </h4>
+
+          <span className="text-xs text-slate-400">
+            {openHistory.length} lệnh
+          </span>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800">
+              <tr className="text-left text-slate-500 dark:text-slate-400">
+                <th className="px-3 py-2">Mã</th>
+                <th className="px-3 py-2">Ngày mua</th>
+                <th className="px-3 py-2">Ngày bán</th>
+                <th className="px-3 py-2">SL mua</th>
+                <th className="px-3 py-2">SL bán</th>
+                <th className="px-3 py-2">Giá mua</th>
+                <th className="px-3 py-2">Giá bán</th>
+                <th className="px-3 py-2">Lợi nhuận</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {openHistory.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-3 py-4 text-center text-slate-400"
+                  >
+                    Không có lệnh chưa chốt
+                  </td>
+                </tr>
+              ) : (
+                openHistory.map(c => (
+                  <tr
+                    key={c.id}
+                    className="border-t border-slate-100 dark:border-slate-700"
+                  >
+                    <td className="px-3 py-2 font-semibold">
+                      {c.symbol}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_date || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_date || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_quantity?.toLocaleString() || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_quantity
+                        ? c.sell_quantity.toLocaleString()
+                        : '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_price
+                        ? formatMoney(c.buy_price)
+                        : '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_price
+                        ? formatMoney(c.sell_price)
+                        : '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      -
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Asset Cards by Group */}
-      {groups.map(group => (
-        <div key={group.label}>
-          <h2 className="mb-3 text-lg font-semibold text-slate-700 dark:text-slate-300">{group.label}</h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {group.items.map(a => (
-              <AssetCard key={a.asset_id} analysis={a} formatMoney={formatMoney} onBuy={openBuy} onSell={openSell} />
-            ))}
-          </div>
+      {/* Đã chốt */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h4 className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+            Đã chốt
+          </h4>
+
+          <span className="text-xs text-slate-400">
+            {completedHistory.length} lệnh
+          </span>
         </div>
-      ))}
 
-      {sortedAnalyses.length === 0 && (
-        <Card><EmptyState message="Chưa có dữ liệu T+" /></Card>
-      )}
+        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <table className="w-full min-w-[760px] text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-800">
+              <tr className="text-left text-slate-500 dark:text-slate-400">
+                <th className="px-3 py-2">Mã</th>
+                <th className="px-3 py-2">Ngày mua</th>
+                <th className="px-3 py-2">Ngày bán</th>
+                <th className="px-3 py-2">SL mua</th>
+                <th className="px-3 py-2">SL bán</th>
+                <th className="px-3 py-2">Giá mua</th>
+                <th className="px-3 py-2">Giá bán</th>
+                <th className="px-3 py-2">Lợi nhuận</th>
+              </tr>
+            </thead>
 
+            <tbody>
+              {completedHistory.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-3 py-4 text-center text-slate-400"
+                  >
+                    Chưa có lệnh đã chốt
+                  </td>
+                </tr>
+              ) : (
+                completedHistory.map(c => (
+                  <tr
+                    key={c.id}
+                    className="border-t border-slate-100 dark:border-slate-700"
+                  >
+                    <td className="px-3 py-2 font-semibold">
+                      {c.symbol}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_date || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_date || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_quantity?.toLocaleString() || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_quantity?.toLocaleString() || '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.buy_price
+                        ? formatMoney(c.buy_price)
+                        : '-'}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {c.sell_price
+                        ? formatMoney(c.sell_price)
+                        : '-'}
+                    </td>
+
+                    <td
+                      className={`px-3 py-2 font-medium ${
+                        c.net_profit >= 0
+                          ? 'text-emerald-500'
+                          : 'text-rose-500'
+                      }`}
+                    >
+                      {formatMoney(c.net_profit)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </Card>
+)}
+{/* Asset List */}
+{quickFilter !== 'HISTORY' && (
+  <>
+    {/* Sort */}
+    <div className="flex items-center gap-3">
+      <div className="w-56">
+        <Select
+          label=""
+          value={sortKey}
+          onChange={(v) => setSortKey(v as SortKey)}
+          options={SORT_OPTIONS}
+        />
+      </div>
+    </div>
+
+    {/* Asset Cards by Group */}
+    {groups.map(group => (
+      <div key={group.label}>
+        <h2 className="mb-3 text-lg font-semibold text-slate-700 dark:text-slate-300">
+          {group.label}
+        </h2>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {group.items.map(a => (
+            <AssetCard
+              key={a.asset_id}
+              analysis={a}
+              formatMoney={formatMoney}
+              onBuy={openBuy}
+              onSell={openSell}
+            />
+          ))}
+        </div>
+      </div>
+    ))}
+
+    {sortedAnalyses.length === 0 && (
+      <Card>
+        <EmptyState message="Chưa có dữ liệu T+" />
+      </Card>
+    )}
+  </>
+)}
       {/* T+ Performance Stats */}
       <Card>
         <h3 className="mb-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Hiệu suất T+</h3>

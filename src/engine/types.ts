@@ -1,5 +1,5 @@
 export type AssetType = 'STOCK' | 'CRYPTO' | 'ETF' | 'FUND' | 'BANK_DEPOSIT';
-export type AccountType = 'STOCK' | 'CRYPTO' | 'ETF' | 'DCDS' | 'BANK';
+export type AccountType = 'UNALLOCATED' | 'STOCK' | 'CRYPTO' | 'ETF' | 'DCDS' | 'BANK';
 export type TransactionType =
   | 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAW'
   | 'DIVIDEND' | 'TRANSFER' | 'SWAP' | 'INTEREST' | 'FEE' | 'TAX';
@@ -21,6 +21,7 @@ export interface Account {
 
 export interface Asset {
   id: string;
+  user_id?: string;
   account_id: string;
   asset_type: AssetType;
   symbol: string;
@@ -28,6 +29,9 @@ export interface Asset {
   category?: string;
   currency: string;
   status: string;
+  current_price?: number | null;
+  price_source?: string | null;
+  price_updated_at?: string | null;
   created_at: string;
 }
 
@@ -59,6 +63,11 @@ export interface Transaction {
   amount: number;
   fee: number;
   tax: number;
+  other_charge?: number;
+  trade_tplus?: boolean;
+  from_account_id?: string | null;
+  to_account_id?: string | null;
+  deleted_at?: string | null;
   transaction_date: string;
   settlement_date?: string | null;
   status: TransactionStatus;

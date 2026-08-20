@@ -209,6 +209,102 @@ export function realizedPnL(
 export function totalPnL(realized: number, unrealized: number): number {
   return realized + unrealized;
 }
+/**
+ * Calculate realized P/L using moving weighted-average cost.
+ *
+ * Important:
+ * - Each SELL uses the average cost that existed BEFORE that SELL.
+ * - Later BUY transactions cannot change the cost basis of an earlier SELL.
+ * - SELL fees/taxes are deducted from the net selling proceeds.
+ * - Only settled/completed SELL transactions are included.
+ */
+export function realizedPnLFromTransactions(
+  transactions: Transaction[],
+  now = new Date(),
+): number {
+  const sortedTransactions = [...transactions]
+    .filter(
+      tx =>
+        tx.transaction_type === 'BUY' ||
+        tx.transaction_type === 'SELL',
+    )
+    .sort((a, b) =>
+      a.transaction_date.localeCompare(b.transaction_date),
+    );
+
+  let quantity = 0;
+  let averageCost = 0;
+  let realized = 0;
+
+  for (const tx of sortedTransactions) {
+    const qty = tx.quantity || 0;
+    const price = tx.price || 0;
+
+    if (qty <= 0 || price < 0) continue;
+
+    // ─────────────────────────────────────────────
+    // BUY
+    // ─────────────────────────────────────────────
+    if (tx.transaction_type === 'BUY') {
+      const newQuantity = quantity + qty;
+
+      if (newQuantity > 0) {
+        averageCost =
+          (quantity * averageCost + qty * price) /
+          newQuantity;
+      }
+
+      quantity = newQuantity;
+      continue;
+    }
+
+    // ─────────────────────────────────────────────
+    // SELL
+    // ─────────────────────────────────────────────
+
+    // Only count completed/settled sells
+    if (tx.status !== 'COMPLETED') continue;
+
+    if (tx.settlement_date) {
+      const settlementDate = new Date(tx.settlement_date);
+
+      if (now < settlementDate) continue;
+    }
+
+    // Never sell more than the quantity available
+    const sellQty = Math.min(qty, quantity);
+
+    if (sellQty <= 0) continue;
+
+    // Cost basis at the EXACT moment of this SELL
+    const recoveredCost = sellQty * averageCost;
+
+    // Net proceeds after fee + tax
+    const netSell = netSellAmount(
+      sellQty,
+      price,
+      tx.fee,
+      tx.tax,
+    );
+
+    realized += realizedPnL(
+      netSell,
+      recoveredCost,
+    );
+
+    // Remove sold quantity while preserving average cost
+    quantity -= sellQty;
+
+    // If position is completely closed,
+    // reset the cost basis.
+    if (quantity <= 0) {
+      quantity = 0;
+      averageCost = 0;
+    }
+  }
+
+  return realized;
+}
 
 export function dailyPnL(
   currentPortfolioValue: number,
@@ -644,18 +740,16 @@ export function computeHoldings(
         }
       }
 
-      // realized P/L from sell transactions for this asset — only settled sells
-      const assetTxs = transactions.filter(
-        t => t.asset_id === h.asset_id && t.transaction_type === 'SELL' && t.status === 'COMPLETED',
-      );
-      let realized = 0;
-      for (const tx of assetTxs) {
-        const sellSettlement = tx.settlement_date ? new Date(tx.settlement_date) : null;
-        if (sellSettlement && now < sellSettlement) continue; // sell not yet settled
-        const netSell = netSellAmount(tx.quantity || 0, tx.price || 0, tx.fee, tx.tax);
-        const recovered = (tx.quantity || 0) * h.average_cost;
-        realized += realizedPnL(netSell, recovered);
-      }
+      // Realized P/L is calculated using the weighted-average
+// cost that existed at the time of each SELL.
+const assetTransactions = transactions.filter(
+  t => t.asset_id === h.asset_id
+);
+
+const realized = realizedPnLFromTransactions(
+  assetTransactions,
+  now,
+);
 
       return {
         asset_id: h.asset_id,

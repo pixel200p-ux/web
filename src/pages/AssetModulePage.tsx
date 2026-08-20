@@ -4,6 +4,7 @@ import { showToast } from '../components/Toast';
 import { formatNumber } from '../lib/dataStore';
 import { useSettings } from '../lib/settings';
 import { loadMasterData, masterDataApi, type MasterData } from '../lib/masterData';
+import { supabase } from '../lib/supabase';
 import type { PortfolioData } from '../lib/dataStore';
 import type { AssetType, TransactionType, Transaction } from '../engine/types';
 import { USD_TO_VND } from '../engine/mockData';
@@ -108,6 +109,18 @@ export function AssetModulePage({
   const categoryTxs = data.transactions.filter(tx =>
     filteredAccounts.some(a => a.id === tx.account_id),
   );
+  // DCDS: Tổng tiền đã nạp = DEPOSIT - WITHDRAW
+const categoryTotalDeposited = categoryTxs.reduce((sum, tx) => {
+  if (tx.transaction_type === 'DEPOSIT') {
+    return sum + tx.amount;
+  }
+
+  if (tx.transaction_type === 'WITHDRAW') {
+    return sum - tx.amount;
+  }
+
+  return sum;
+}, 0);
 
   // Transaction type options — remove DIVIDEND for Crypto and Bank
   const txTypeOptions = [
@@ -186,11 +199,111 @@ export function AssetModulePage({
     setShowTxModal(true);
   };
 
-  const handleSaveTx = () => {
-    setShowTxModal(false);
-    showToast(editingTx ? 'Giao dịch đã cập nhật (bản thử nghiệm)' : 'Giao dịch đã tạo (bản thử nghiệm)', 'success');
-    setEditingTx(null);
-    setTxQty(''); setTxPrice(''); setTxAmount(''); setTxDepositAmount(''); setTxFeeRate(''); setTxDepositTerm('');
+  const handleSaveTx = async () => {
+    try {
+      setShowTxModal(false);
+      
+      // Lấy account_id
+      let finalAccountId = txAccount || (categoryAccounts[0]?.id);
+      if (!finalAccountId && (txType === 'DEPOSIT' || txType === 'WITHDRAW' || txType === 'TRANSFER')) {
+        // Fallback cho tài khoản đầu tiên
+        finalAccountId = data.accounts[0]?.id;
+      }
+      
+      if (!finalAccountId) {
+        showToast('Vui lòng chọn hoặc tạo tài khoản trước', 'error');
+        return;
+      }
+
+      const parsedQty = parseFloat(txQty) || 0;
+      const parsedPrice = parseFloat(txPrice) || 0;
+      const parsedFee = parseFloat(txFeeRate) || 0;
+      const parsedAmount = parseFloat(txAmount) || (parsedQty * parsedPrice) || 0;
+
+      let assetId: string | null = null;
+      if (showAssetField && txAsset) {
+        // Find or create asset
+        const symbolUpper = txAsset.toUpperCase();
+        let asset = data.assets.find(a => a.account_id === finalAccountId && a.symbol === symbolUpper);
+        if (!asset) {
+          const { data: newAsset, error: assetErr } = await supabase
+            .from('portfolio_assets')
+            .insert({
+              account_id: finalAccountId,
+              symbol: symbolUpper,
+              asset_type: assetType,
+              currency: isCrypto ? 'USDT' : 'VND',
+              status: 'ACTIVE',
+            })
+            .select()
+            .single();
+
+          if (assetErr) throw assetErr;
+          asset = newAsset as any;
+        }
+        assetId = asset?.id || null;
+      }
+
+      const txDateStr = editingTx?.transaction_date || new Date().toISOString();
+
+      const payload = {
+        account_id: finalAccountId,
+        asset_id: assetId,
+        transaction_type: txType,
+        quantity: parsedQty || null,
+        price: parsedPrice || null,
+        amount: parsedAmount,
+        fee: parsedFee,
+        status: 'COMPLETED' as const,
+        notes: editingTx?.notes || '',
+        transaction_date: txDateStr,
+      };
+
+      if (editingTx) {
+        const { error } = await supabase
+          .from('portfolio_transactions')
+          .update(payload)
+          .eq('id', editingTx.id);
+
+        if (error) throw error;
+        showToast('Đã cập nhật giao dịch thành công', 'success');
+      } else {
+        const { error } = await supabase
+          .from('portfolio_transactions')
+          .insert(payload);
+
+        if (error) throw error;
+        showToast('Đã thêm giao dịch mới thành công', 'success');
+      }
+
+      // Refresh data
+      const { refresh } = usePortfolio();
+      await refresh();
+    } catch (err: any) {
+      console.error('Lỗi khi lưu giao dịch:', err);
+      showToast(err.message || 'Lỗi khi lưu giao dịch', 'error');
+    } finally {
+      setEditingTx(null);
+      setTxQty(''); setTxPrice(''); setTxAmount(''); setTxDepositAmount(''); setTxFeeRate(''); setTxDepositTerm('');
+    }
+  };
+
+  const handleDeleteTx = async (tx: Transaction) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa giao dịch này?')) return;
+    try {
+      const { error } = await supabase
+        .from('portfolio_transactions')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', tx.id);
+
+      if (error) throw error;
+      showToast('Đã xóa giao dịch thành công', 'success');
+      const { refresh } = usePortfolio();
+      await refresh();
+    } catch (err: any) {
+      console.error('Lỗi khi xóa giao dịch:', err);
+      showToast('Lỗi khi xóa giao dịch', 'error');
+    }
   };
 
   const handleAddStock = async () => {
@@ -256,7 +369,7 @@ export function AssetModulePage({
   const showAmountField = txType === 'DEPOSIT' || txType === 'WITHDRAW' || txType === 'DIVIDEND' || isCrypto;
   const showFeeField = txType !== 'DEPOSIT' && txType !== 'WITHDRAW';
   const showDepositTermField = isBank && showAssetField;
-  const showDepositAmountField = isBank && (txType === 'DEPOSIT' || txType === 'BUY');
+  const showDepositAmountField = (isBank || isDCDS) && (txType === 'DEPOSIT' || txType === 'BUY');
 
   // Bank holdings: sort by remaining days ascending (nearest maturity first)
   const sortedHoldings = isBank
@@ -334,8 +447,13 @@ export function AssetModulePage({
           <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(categoryCash)}</h3>
         </div>
         <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
-          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Giá trị thị trường</p>
-          <h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">{formatMoney(categoryMarketValue)}</h3>
+          <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">
+  Tổng tiền đã nạp
+</p>
+
+<h3 className="mt-1 truncate text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 md:text-2xl">
+  {formatMoney(categoryTotalDeposited)}
+</h3>
         </div>
         <div className="flex min-h-[75px] flex-col justify-between rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50 md:min-h-[100px] md:p-5">
           <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400 md:text-sm">Lãi/Lỗ</p>
@@ -345,30 +463,6 @@ export function AssetModulePage({
         </div>
       </div>
 
-      {/* Accounts */}
-      <Card>
-        <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">Tài khoản</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {categoryAccounts.map(acc => {
-            const cash = data.cashBalances.find(c => c.account_id === acc.id);
-            const accHoldings = data.holdings.filter(h => {
-              const asset = data.assets.find(a => a.id === h.asset_id);
-              return asset?.account_id === acc.id && h.asset_type === assetType;
-            });
-            const accValue = accHoldings.reduce((s, h) => s + h.market_value, 0);
-            return (
-              <div key={acc.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-700 dark:text-slate-200">{acc.account_name}</span>
-                  <Badge>{acc.broker}</Badge>
-                </div>
-                <p className="mt-2 text-sm text-slate-500">Cash: <span className="whitespace-nowrap">{formatMoney(cash ? (cash.currency === 'USDT' ? cash.available_cash * USD_TO_VND : cash.available_cash) : 0)}</span></p>
-                <p className="text-sm text-slate-500">Giá trị: <span className="whitespace-nowrap">{formatMoney(accValue)}</span></p>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
 
       {/* Holdings */}
       <Card>
@@ -608,7 +702,7 @@ export function AssetModulePage({
                 <label className="mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300">Số lượng CCQ mua được</label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:bg-slate-700/50 dark:text-slate-200">
-                    {dcdsQuantity > 0 ? formatNumber(dcdsQuantity, 2) : '0'}
+                    {dcdsQuantity > 0 ? formatNumber(dcdsQuantity, 4) : '0'}
                   </div>
                   <span className="text-sm text-slate-400">CCQ</span>
                 </div>

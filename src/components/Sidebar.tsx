@@ -10,7 +10,11 @@ const investmentItems: { id: PageId; label: string; icon: string }[] = [
   { id: 'dcds', label: 'DCDS', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
   { id: 'etf', label: 'ETF', icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z' },
   { id: 'stocks', label: 'Stock', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-  { id: 'crypto', label: 'Crypto', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1' },
+  { 
+  id: 'crypto', 
+  label: 'Crypto', 
+  icon: 'M12 3.5c-2.15 0-3.9 1.15-3.9 2.65 0 1.5 1.75 2.65 3.9 2.65s3.9 1.15 3.9 2.65-1.75 2.65-3.9 2.65-3.9 1.15-3.9 2.65S9.85 19.4 12 19.4m0-15.9v1.3m0 2.65v1.3m0 2.65v1.3m0 2.65v1.3'
+},
   { id: 'bank', label: 'Bank', icon: 'M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3' },
 ];
 
@@ -111,7 +115,7 @@ export function Sidebar({
             </div>
             <button
               onClick={signOut}
-              className="text-slate-400 hover:text-rose-500"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800"
               title="Đăng xuất"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

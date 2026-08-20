@@ -36,13 +36,13 @@ export function DashboardPage({ data }: { data: PortfolioData }) {
    * Stock → Crypto → ETF → DCDS → Bank → Cash
    */
   const categoryKeys = [
-  'FUND',          // DCDS
-  'ETF',           // ETF
-  'STOCK',         // Stock
-  'BANK_DEPOSIT',  // Bank
-  'CRYPTO',        // Crypto
-  'CASH',          // Cash
-];
+    'FUND',          // DCDS
+    'ETF',           // ETF
+    'STOCK',         // Stock
+    'CRYPTO',        // Crypto
+    'BANK_DEPOSIT',  // Bank
+    'CASH',          // Cash
+  ];
 
   const allocData = categoryKeys
     .map((key) => ({
@@ -136,66 +136,95 @@ export function DashboardPage({ data }: { data: PortfolioData }) {
           HEADER
       ====================================================== */}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
-            Dashboard
-          </h1>
+      <div className="flex items-start justify-between gap-4">
+  <div>
+    <h1 className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">
+      Dashboard
+    </h1>
 
-          <p className="mt-1 text-sm text-slate-400">
-            Tổng quan toàn bộ danh mục đầu tư
-          </p>
-        </div>
-      </div>
+    <p className="mt-1 text-sm text-slate-400">
+      Tổng quan toàn bộ danh mục đầu tư
+    </p>
+  </div>
+
+  <div className="shrink-0 text-right">
+    <p className="text-xs font-medium text-slate-400">
+      Cash
+    </p>
+
+    <p className="mt-1 text-base font-bold text-slate-100 sm:text-lg">
+      {formatMoney(summary.totalCash)}
+    </p>
+  </div>
+</div>
 
 
-      {/* =====================================================
+            {/* =====================================================
           SUMMARY CARDS
       ====================================================== */}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+      {/*
+       * Tổng tiền đã nạp = Deposit - Withdraw
+       * Đây là VỐN GỐC của người dùng.
+       */}
+      {(() => {
+        const netDeposits = netDepositFromTransactions(transactions);
 
-        {/* Tổng tài sản */}
-        <DashboardStatCard
-          title="Tổng tài sản"
-          value={formatMoney(summary.totalAsset)}
-          subtitle={formatPct(summary.totalReturnPct)}
-          subtitleClass={
-            summary.totalReturnPct < 0
-              ? 'text-rose-500'
-              : 'text-emerald-400'
-          }
-        />
+        /*
+         * Tổng tài sản hiện tại:
+         * Giá trị toàn bộ tài sản hiện tại sau khi đã phản ánh
+         * lãi/lỗ, tăng giảm giá trị tài sản.
+         */
+        const currentTotalAsset = summary.totalAsset;
 
-        {/* Cash */}
-        <DashboardStatCard
-          title="Cash"
-          value={formatMoney(summary.totalCash)}
-          subtitle={`${(
-            summary.allocation.CASH || 0
-          ).toFixed(1)}% tổng tài sản`}
-        />
+        /*
+         * Tổng Lãi/Lỗ so với vốn đã nạp:
+         *
+         * Tổng tài sản hiện tại - Tổng tiền đã nạp
+         */
+        const totalPnLvsDeposits =
+          currentTotalAsset - netDeposits;
 
-        {/* Tổng tiền đã nạp */}
-        <DashboardStatCard
-          title="Tổng tiền đã nạp"
-          value={formatMoney(netDeposits)}
-          subtitle="Vốn gốc"
-        />
+        /*
+         * Tỷ suất Lãi/Lỗ trên vốn gốc
+         */
+        const pnlPct =
+          netDeposits !== 0
+            ? (totalPnLvsDeposits / netDeposits) * 100
+            : 0;
 
-        {/* Tổng Lãi/Lỗ */}
-        <DashboardStatCard
-          title="Tổng Lãi/Lỗ"
-          value={formatMoney(summary.totalPnL)}
-          subtitle={formatPct(summary.totalReturnPct)}
-          subtitleClass={
-            summary.totalPnL < 0
-              ? 'text-rose-500'
-              : 'text-emerald-400'
-          }
-        />
+        return (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
 
-      </div>
+            {/* Tổng tài sản hiện tại */}
+            <DashboardStatCard
+              title="Tổng tài sản hiện tại"
+              value={formatMoney(currentTotalAsset)}
+              subtitle="Sau khi tính lãi/lỗ"
+            />
+
+            {/* Tổng tiền đã nạp */}
+            <DashboardStatCard
+              title="Tổng tiền đã nạp"
+              value={formatMoney(netDeposits)}
+              subtitle="Vốn gốc"
+            />
+
+            {/* Tổng Lãi/Lỗ */}
+            <DashboardStatCard
+              title="Tổng Lãi/Lỗ"
+              value={formatMoney(totalPnLvsDeposits)}
+              subtitle={`${formatPct(pnlPct)} so với vốn gốc`}
+              subtitleClass={
+                totalPnLvsDeposits < 0
+                  ? 'text-rose-500'
+                  : 'text-emerald-400'
+              }
+            />
+
+          </div>
+        );
+      })()}
 
 
       {/* =====================================================

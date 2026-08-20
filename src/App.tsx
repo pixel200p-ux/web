@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { AuthProvider, useAuth } from './lib/auth';
 import { SettingsProvider, useSettings } from './lib/settings';
 import { LoginPage } from './pages/LoginPage';
@@ -12,7 +12,49 @@ import { ReportsPage } from './pages/ReportsPage';
 import { SimulatorPage } from './pages/SimulatorPage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { loadMockData, type PortfolioData } from './lib/dataStore';
+import { PortfolioProvider, usePortfolio } from './lib/portfolioContext';
+import { useMarketPrices } from './hooks/useMarketPrices';
+
+function RefreshPricesButton() {
+  const { data, refresh } = usePortfolio();
+  const { updating, refreshAllPrices } = useMarketPrices();
+
+  const handleRefresh = async () => {
+    if (!data || updating) return;
+    const symbols = data.assets.map(a => ({
+      id: a.id,
+      symbol: a.symbol,
+      type: a.asset_type,
+    }));
+    await refreshAllPrices(symbols);
+    await refresh();
+  };
+
+  return (
+    <button
+      onClick={handleRefresh}
+      disabled={updating}
+      className="flex h-9 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-50 px-3 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+      title="Cập nhật giá thị trường tự động"
+    >
+      <svg
+        className={`h-4 w-4 ${updating ? 'animate-spin' : ''}`}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+        />
+      </svg>
+      <span>{updating ? 'Đang cập nhật...' : 'Cập nhật giá'}</span>
+    </button>
+  );
+}
+
 
 function ThemeToggle() {
   const { resolvedTheme, toggleTheme } = useSettings();
@@ -56,9 +98,9 @@ function AppContent() {
   const [page, setPage] = useState<PageId>('dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const data: PortfolioData = useMemo(() => loadMockData(), []);
+  const { data, loading: portfolioLoading, error: portfolioError } = usePortfolio();
 
-  if (loading) {
+  if (loading || portfolioLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-900">
         <div className="text-slate-400">Đang tải...</div>
@@ -69,6 +111,9 @@ function AppContent() {
   if (!session) {
     return <LoginPage />;
   }
+
+  if (portfolioError) return <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-center text-rose-500 dark:bg-slate-900">{portfolioError}</div>;
+  if (!data) return null;
 
   const renderPage = () => {
     switch (page) {
@@ -106,6 +151,8 @@ function AppContent() {
             <span className="font-semibold text-slate-700 dark:text-slate-200">Portfolio Manager</span>
           </div>
           <div className="flex items-center gap-3">
+            <RefreshPricesButton />
+
             <CurrencyToggle />
             <ThemeToggle />
           </div>
@@ -123,7 +170,7 @@ function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <AppContent />
+        <PortfolioProvider><AppContent /></PortfolioProvider>
       </AuthProvider>
     </SettingsProvider>
   );

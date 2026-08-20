@@ -180,8 +180,8 @@ export function Select({
         onChange={e => onChange(e.target.value)}
         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
       >
-        {options.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+        {options.map((o, index) => (
+          <option key={`${o.value}-${index}`} value={o.value}>{o.label}</option>
         ))}
       </select>
     </div>
